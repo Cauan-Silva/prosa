@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  servidor:
+    name: Servidor (Go)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: teste
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Formatação
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: go vet
+        run: go vet ./...
+      - name: Testes (com detector de corrida, banco e Redis de verdade)
+        env:
+          PROSA_TESTE_BANCO: postgres://postgres:teste@localhost:5432/postgres?sslmode=disable
+          PROSA_TESTE_REDIS: redis://localhost:6379/15
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v ./... | tee saida.txt
+          echo "### $(grep -c '^--- PASS' saida.txt) testes do servidor passaram" >> "$GITHUB_STEP_SUMMARY"
+
+  telas:
+    name: Telas (React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+
+  imagem:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    needs: [servidor, telas]
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t prosa .

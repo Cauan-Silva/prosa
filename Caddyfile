@@ -1,0 +1,9 @@
+# Balanceador do docker-compose: divide as pessoas entre as instâncias do Prosa.
+# O WebSocket passa direto (o Caddy cuida disso sozinho).
+:8080 {
+	reverse_proxy prosa1:8080 prosa2:8080 {
+		lb_policy round_robin
+		health_uri /api/saude
+		health_interval 5s
+	}
+}

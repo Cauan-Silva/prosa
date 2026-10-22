@@ -1,0 +1,34 @@
+# Blueprint do Render: New > Blueprint > escolha este repositório.
+# O banco é o PostgreSQL gratuito do Neon (veja o README para a DATABASE_URL).
+# No plano gratuito roda uma instância só, então não precisa de Redis.
+services:
+  - type: web
+    name: prosa
+    runtime: docker
+    plan: free
+    region: virginia
+    healthCheckPath: /api/saude
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SEGREDO
+        generateValue: true
+      # Anexos num armazenamento S3 compatível (ex.: Backblaze B2). Sem isso, somem a cada deploy.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGIAO
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_CHAVE
+        sync: false
+      - key: S3_SEGREDO
+        sync: false
+      # Voz: o Render não recebe UDP, então a mídia precisa passar por um servidor TURN.
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_USUARIO
+        sync: false
+      - key: TURN_SENHA
+        sync: false

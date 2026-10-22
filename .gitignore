@@ -1,0 +1,18 @@
+# Dependências e builds
+node_modules/
+frontend/dist/
+backend/internal/web/dist/*
+!backend/internal/web/dist/.gitkeep
+/prosa
+/carga
+
+# Dados locais
+arquivos/
+backend/arquivos/
+.env
+
+# Editores e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

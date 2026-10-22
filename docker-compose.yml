@@ -1,0 +1,78 @@
+# Prosa com duas instâncias atrás de um balanceador, PostgreSQL e Redis.
+#
+#   docker compose up --build
+#
+# Abra http://localhost:8080 (o balanceador). As instâncias também respondem direto em
+# :8081 e :8082 — é para lá que a voz vai, porque cada sala de voz fica numa instância.
+# Para testar a voz de outro aparelho da rede, troque VOZ_IP_PUBLICO pelo IP desta máquina.
+
+x-prosa: &prosa
+  build: .
+  restart: unless-stopped
+  depends_on:
+    banco:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  volumes:
+    - arquivos:/home/nonroot/arquivos # anexos divididos entre as instâncias
+
+x-ambiente: &ambiente
+  DATABASE_URL: postgres://prosa:prosa@banco:5432/prosa?sslmode=disable
+  REDIS_URL: redis://redis:6379/0
+  JWT_SEGREDO: ${JWT_SEGREDO:-troque-este-segredo-por-um-bem-grande-e-aleatorio}
+  ORIGENS_WS: localhost:8080,localhost:8081,localhost:8082
+  VOZ_IP_PUBLICO: ${VOZ_IP_PUBLICO:-127.0.0.1}
+  LOGIN_POR_MINUTO: ${LOGIN_POR_MINUTO:-10}
+
+services:
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prosa
+      POSTGRES_PASSWORD: prosa
+      POSTGRES_DB: prosa
+    volumes:
+      - banco:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prosa"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  prosa1:
+    <<: *prosa
+    environment:
+      <<: *ambiente
+      INSTANCIA: prosa1
+      ENDERECO_PUBLICO: http://localhost:8081
+      VOZ_PORTA_UDP: "50001"
+    ports:
+      - "8081:8080"
+      - "50001:50001/udp"
+
+  prosa2:
+    <<: *prosa
+    environment:
+      <<: *ambiente
+      INSTANCIA: prosa2
+      ENDERECO_PUBLICO: http://localhost:8082
+      VOZ_PORTA_UDP: "50002"
+    ports:
+      - "8082:8080"
+      - "50002:50002/udp"
+
+  balanceador:
+    image: caddy:2-alpine
+    depends_on: [prosa1, prosa2]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  banco:
+  arquivos:
