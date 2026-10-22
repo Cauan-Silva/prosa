@@ -31,11 +31,14 @@ type Config struct {
 	MaxAnexoMB int    // MAX_ANEXO_MB
 
 	// Voz
+	CFTurnID    string   // CF_TURN_ID: TURN do Cloudflare Realtime (1.000 GB grátis/mês)
+	CFTurnToken string   // CF_TURN_TOKEN
 	TurnURLs    []string // TURN_URLS
 	TurnUsuario string   // TURN_USUARIO
 	TurnSenha   string   // TURN_SENHA
 	PortaUDP    int      // VOZ_PORTA_UDP: porta única para a mídia (0 = portas aleatórias)
 	IPPublico   string   // VOZ_IP_PUBLICO: IP anunciado para a mídia (atrás de NAT/Docker)
+	MaxDireto   int      // VOZ_DIRETO_MAX: até quantas pessoas a mídia vai direto entre navegadores (0 = nunca; padrão 5)
 }
 
 const segredoDev = "segredo-de-desenvolvimento-do-prosa-troque-em-producao"
@@ -55,6 +58,8 @@ func Ler() (Config, error) {
 		S3Segredo:       valor("S3_SEGREDO", ""),
 		PastaLocal:      valor("PASTA_ARQUIVOS", "arquivos"),
 		TurnUsuario:     valor("TURN_USUARIO", ""),
+		CFTurnID:        valor("CF_TURN_ID", ""),
+		CFTurnToken:     valor("CF_TURN_TOKEN", ""),
 		TurnSenha:       valor("TURN_SENHA", ""),
 		IPPublico:       valor("VOZ_IP_PUBLICO", ""),
 	}
@@ -67,6 +72,9 @@ func Ler() (Config, error) {
 	}
 	if c.PortaUDP, err = strconv.Atoi(valor("VOZ_PORTA_UDP", "0")); err != nil {
 		return c, errors.New("VOZ_PORTA_UDP precisa ser um número")
+	}
+	if c.MaxDireto, err = strconv.Atoi(valor("VOZ_DIRETO_MAX", "5")); err != nil || c.MaxDireto < 0 {
+		return c, errors.New("VOZ_DIRETO_MAX precisa ser um número (0 desliga o modo direto)")
 	}
 
 	segredo := os.Getenv("JWT_SEGREDO")

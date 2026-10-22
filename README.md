@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Cauan-Silva/prosa/actions/workflows/ci.yml/badge.svg)](https://github.com/Cauan-Silva/prosa/actions/workflows/ci.yml)
 
-Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go e React: canais de texto e de voz, cargos com permissões por canal, moderação, convites, menções, reações, anexos e busca. A voz passa por um servidor de mídia próprio (SFU com o Pion), com câmera e compartilhamento de tela, e o servidor roda em várias instâncias ao mesmo tempo usando o Redis para combinar tudo.
+Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go e React: canais de texto e de voz, cargos com permissões por canal, moderação, convites, menções, reações, anexos e busca. A voz vai direto entre os navegadores em salas pequenas e passa por um servidor de mídia próprio (SFU com o Pion) nas grandes, com câmera e compartilhamento de tela, e o servidor roda em várias instâncias ao mesmo tempo usando o Redis para combinar tudo.
 
 <!-- Depois de publicar, troque pelo seu link: -->
 <!-- **Ver online:** https://prosa.onrender.com (o plano gratuito pode levar ~1 minuto para acordar) -->
@@ -71,7 +71,9 @@ flowchart LR
 
 **Ordem e reconexão.** As mensagens têm id crescente do PostgreSQL e a tela ordena por ele. Ao reconectar, o navegador recebe o estado de novo (`PRONTO`) e busca o que perdeu em cada canal aberto (`?depois=<última>`). Cada mensagem enviada leva um `nonce`, que troca a mensagem “enviando…” pela real sem duplicar.
 
-**A voz é um SFU.** Cada pessoa abre uma única conexão WebRTC com o servidor e manda até três faixas (microfone, câmera e tela). O servidor repassa os pacotes de cada faixa para os outros da sala sem decodificar nada, então cada navegador envia uma vez só, seja para 2 ou para 25 pessoas. A negociação é sempre puxada pelo servidor: ele manda a oferta e o navegador só responde, o que evita ofertas cruzadas. Ligar a câmera é só trocar a faixa (sem renegociar); quando alguém entra ou liga uma faixa nova, o servidor a acrescenta nas conexões dos outros e manda uma oferta nova. Áudio de quem não pode falar ou foi silenciado não é repassado.
+**Salas pequenas falam direto.** Com até 5 pessoas (`VOZ_DIRETO_MAX`), cada navegador abre uma conexão WebRTC com cada um dos outros e o áudio e o vídeo vão direto, sem passar pelo servidor, que só repassa a negociação (oferta, resposta e candidatos) pela conexão de voz. Isso deixa a latência menor e não gasta o tráfego da hospedagem (o plano grátis do Render inclui só 5 GB de saída por mês). Quem tem o id menor liga, e cada conexão já nasce com as quatro faixas, então ligar a câmera ou a tela é só trocar a faixa, sem renegociar. Como o servidor não está no caminho, quem recebe é que corta o áudio de quem foi silenciado ou não tem permissão. Quando a sala passa do limite, todo mundo troca para o SFU; quando volta a caber (com folga de uma pessoa, para não ficar trocando), volta para o direto.
+
+**Salas grandes usam o SFU.** Cada pessoa abre uma única conexão WebRTC com o servidor e manda até quatro faixas (microfone, câmera, tela e som da tela). O servidor repassa os pacotes de cada faixa para os outros da sala sem decodificar nada, então cada navegador envia uma vez só, seja para 2 ou para 25 pessoas. A negociação é sempre puxada pelo servidor: ele manda a oferta e o navegador só responde, o que evita ofertas cruzadas. Ligar a câmera é só trocar a faixa (sem renegociar); quando alguém entra ou liga uma faixa nova, o servidor a acrescenta nas conexões dos outros e manda uma oferta nova. Áudio de quem não pode falar ou foi silenciado não é repassado.
 
 **Uma sala de voz mora numa instância.** A mídia de todos tem que passar pelo mesmo SFU, então a primeira instância que recebe alguém na sala reserva a sala no Redis (`SETNX` com validade renovada). Quem cair em outra instância é redirecionado para a dona (`ENDERECO_PUBLICO`). Quem está em cada sala é publicado para todo mundo do servidor pelo mesmo barramento de eventos.
 
@@ -161,8 +163,10 @@ go run ./cmd/carga -url http://localhost:8081,http://localhost:8082 -usuarios 10
 | `ENDERECO_PUBLICO` | Endereço desta instância visto pelo navegador, para redirecionar a sala de voz (só com várias instâncias) |
 | `S3_ENDPOINT`, `S3_REGIAO`, `S3_BUCKET`, `S3_CHAVE`, `S3_SEGREDO` | Armazenamento dos anexos. Sem eles, os anexos vão para a pasta `PASTA_ARQUIVOS` (padrão `arquivos`) |
 | `MAX_ANEXO_MB` | Tamanho máximo de cada anexo (padrão 8) |
-| `TURN_URLS`, `TURN_USUARIO`, `TURN_SENHA` | Servidor TURN para a voz (obrigatório onde não entra UDP, como no Render) |
+| `CF_TURN_ID`, `CF_TURN_TOKEN` | TURN do Cloudflare Realtime (1.000 GB grátis por mês); o Prosa gera credenciais temporárias sozinho |
+| `TURN_URLS`, `TURN_USUARIO`, `TURN_SENHA` | Ou um servidor TURN fixo (obrigatório ter um TURN onde não entra UDP, como no Render) |
 | `VOZ_PORTA_UDP` | Porta UDP única para toda a mídia (padrão: portas aleatórias) |
+| `VOZ_DIRETO_MAX` | Até quantas pessoas a mídia vai direto entre os navegadores, sem passar pelo servidor (padrão: 5; `0` desliga) |
 | `VOZ_IP_PUBLICO` | IP anunciado para a mídia quando o servidor está atrás de NAT ou Docker |
 | `LOGIN_POR_MINUTO` | Tentativas de login e cadastro por IP por minuto (padrão 10) |
 
@@ -177,7 +181,10 @@ O plano gratuito do Render dorme depois de 15 minutos sem uso; o primeiro acesso
 
 ### Voz no Render (TURN)
 
-O Render só recebe tráfego HTTP; a mídia da voz (UDP) não chega direto no servidor. Por isso, lá a voz precisa de um servidor **TURN**, que retransmite a mídia entre o navegador e o Prosa. Há opções gratuitas com limite mensal, como o [Open Relay da Metered](https://www.metered.ca/tools/openrelay/). Preencha `TURN_URLS` (ex.: `turn:servidor:80,turn:servidor:443?transport=tcp,turns:servidor:443`), `TURN_USUARIO` e `TURN_SENHA`. Sem TURN, todo o resto funciona normalmente; só a voz não conecta. Rodando com Docker no seu computador ou numa VPS com a porta UDP liberada, o TURN não é necessário.
+Em salas de até 5 pessoas a mídia vai direto entre os navegadores e quase nunca precisa de TURN (só quando a rede de alguém bloqueia a conexão direta). Nas salas maiores ela passa pelo Prosa, e o Render só recebe tráfego HTTP: a mídia (UDP) não chega direto no servidor. Por isso, lá a voz precisa de um servidor **TURN**, que retransmite a mídia entre o navegador e o Prosa.
+
+- **Recomendado: [TURN do Cloudflare Realtime](https://developers.cloudflare.com/realtime/turn/)**, com 1.000 GB grátis por mês. No painel do Cloudflare, crie uma chave TURN em **Realtime → TURN Server** e coloque o **Token ID** em `CF_TURN_ID` e o **API Token** em `CF_TURN_TOKEN`. O Prosa pede credenciais temporárias (24 h) ao Cloudflare e renova sozinho.
+- **Ou um TURN fixo**, como o da [Metered](https://www.metered.ca/stun-turn) (o plano grátis tem só 500 MB por mês, que uma tela compartilhada gasta em minutos): preencha `TURN_URLS` (separados por vírgula), `TURN_USUARIO` e `TURN_SENHA`. Sem TURN, todo o resto funciona normalmente; só a voz não conecta. Rodando com Docker no seu computador ou numa VPS com a porta UDP liberada, o TURN não é necessário.
 
 ## API
 

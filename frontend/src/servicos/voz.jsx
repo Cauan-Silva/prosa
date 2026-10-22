@@ -1,8 +1,12 @@
-// Voz: uma conexão WebRTC com o servidor de mídia (SFU) do Prosa.
+// Voz do Prosa, em dois modos que o servidor escolhe pelo tamanho da sala:
 //
-// O servidor manda as ofertas; o navegador só responde. As três primeiras faixas da
-// conexão são as de envio (microfone, câmera e tela); o que chega dos outros vem em
-// faixas novas, identificadas pelo id do "stream" (u<id da pessoa>).
+// - "direto" (salas pequenas): cada navegador abre uma conexão WebRTC com cada um dos
+//   outros e a mídia vai direto, sem passar pelo servidor (que só repassa a negociação).
+//   Quem tem o id menor liga; cada conexão já nasce com as quatro faixas (microfone,
+//   câmera, tela e som da tela), então ligar a câmera é só trocar a faixa, sem renegociar.
+// - "sfu" (salas grandes): uma conexão só com o servidor de mídia. O servidor manda as
+//   ofertas e o navegador responde; as quatro primeiras faixas são as de envio e o que
+//   chega dos outros vem em faixas novas, identificadas pelo id do "stream" (u<id>).
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { api, lerToken } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
@@ -10,6 +14,8 @@ import { aoMudar, preferencias, usePreferencias } from './preferencias.js'
 import { Processador, abrirMicrofone } from './microfone.js'
 
 const Contexto = createContext(null)
+const TIPOS = ['audio', 'camera', 'tela', 'telaAudio']
+const tipoDeMidia = (tipo) => (tipo === 'audio' || tipo === 'telaAudio' ? 'audio' : 'video')
 
 const inicial = {
   canalId: null,
@@ -46,6 +52,12 @@ class Sessao {
     this.locais = { camera: null, tela: null } // prévias do que eu mando
     this.remotos = {} // usuarioId -> { audio, camera, tela } (MediaStream)
     this.mids = {}
+    this.geracao = 0 // conexão com o servidor (modo sfu)
+    this.icePendentes = []
+    this.modo = null
+    this.participantes = []
+    this.pares = new Map() // usuarioId -> conexão direta (modo direto)
+    this.iceAntecipado = {}
     this.fila = Promise.resolve()
     this.niveis = {}
     this.fechada = false
@@ -107,7 +119,8 @@ class Sessao {
         const { t, d } = JSON.parse(m.data)
         if (t === 'VOZ_PRONTO') {
           pronta = true
-          this.criarConexao(d.ice || this.ice)
+          this.eu = d.usuarioId
+          this.ice = d.ice || this.ice
           this.enviarEstado()
           resolver()
         } else if (t === 'VOZ_REDIRECIONAR' && tentativa < 2) {
@@ -116,7 +129,12 @@ class Sessao {
         } else if (t === 'VOZ_OFERTA') {
           this.fila = this.fila.then(() => this.responder(d)).catch((e) => console.warn('voz: oferta', e))
         } else if (t === 'VOZ_ICE') {
-          this.fila = this.fila.then(() => this.pc?.addIceCandidate(d.candidato)).catch(() => {})
+          if (d.g === this.geracao) this.fila = this.fila.then(() => this.pc?.addIceCandidate(d.candidato)).catch(() => {})
+          else if (d.g > this.geracao) this.icePendentes.push(d) // chegou antes da oferta
+        } else if (t === 'VOZ_SALA') {
+          this.atualizarSala(d)
+        } else if (t === 'VOZ_P2P') {
+          this.sinal(d.de, d.sinal)
         } else if (t === 'VOZ_ERRO') {
           this.erro = d.mensagem
           this.aoMudar()
@@ -129,11 +147,16 @@ class Sessao {
     })
   }
 
-  criarConexao(ice) {
-    const pc = new RTCPeerConnection({ iceServers: ice })
+  // ---- modo sfu: uma conexão com o servidor ----
+
+  criarConexao(g) {
+    this.fecharServidor()
+    const pc = new RTCPeerConnection({ iceServers: this.ice })
     this.pc = pc
-    pc.onicecandidate = (e) => e.candidate && this.mandar('VOZ_ICE', { candidato: e.candidate.toJSON() })
+    this.geracao = g
+    pc.onicecandidate = (e) => e.candidate && this.mandar('VOZ_ICE', { candidato: e.candidate.toJSON(), g })
     pc.onconnectionstatechange = () => {
+      if (this.pc !== pc) return
       if (pc.connectionState === 'failed') {
         this.erro = 'A conexão de mídia falhou. Sua rede pode estar bloqueando UDP (o servidor precisa de TURN).'
         this.aoMudar('caiu')
@@ -156,10 +179,22 @@ class Sessao {
     }
   }
 
-  async responder({ sdp, mids }) {
+  fecharServidor() {
+    if (!this.pc) return
+    this.pc.onconnectionstatechange = null
+    this.pc.close()
+    this.pc = null
+    this.mids = {}
+  }
+
+  async responder({ sdp, mids, g }) {
+    if (g !== this.geracao || !this.pc) this.criarConexao(g)
     const pc = this.pc
     this.mids = mids
     await pc.setRemoteDescription({ type: 'offer', sdp })
+    const pendentes = this.icePendentes.filter((c) => c.g === g)
+    this.icePendentes = this.icePendentes.filter((c) => c.g > g)
+    for (const c of pendentes) pc.addIceCandidate(c.candidato).catch(() => {})
     for (const t of pc.getTransceivers()) {
       const tipo = mids[t.mid]
       if (!tipo) continue
@@ -169,34 +204,176 @@ class Sessao {
     }
     const resposta = await pc.createAnswer()
     await pc.setLocalDescription(resposta)
-    this.mandar('VOZ_RESPOSTA', { sdp: pc.localDescription.sdp })
+    this.mandar('VOZ_RESPOSTA', { sdp: pc.localDescription.sdp, g })
     await this.ajustarQualidade()
+  }
+
+  // ---- quem está na sala e em que modo ----
+
+  atualizarSala({ modo, participantes }) {
+    this.participantes = participantes || []
+    if (modo !== this.modo) {
+      this.modo = modo
+      // troca de modo: tudo que chegava pelo caminho antigo para
+      if (modo === 'direto') this.fecharServidor()
+      for (const id of [...this.pares.keys()]) this.fecharPar(id)
+      this.remotos = {}
+      this.niveis = this.niveis.eu ? { eu: this.niveis.eu } : {}
+    }
+    if (modo === 'direto') this.sincronizarPares()
+    this.aoMudar()
+  }
+
+  // No modo direto quem recebe é que corta a mídia de quem foi silenciado ou não tem permissão.
+  bloqueado(id, tipo) {
+    const p = this.participantes.find((x) => x.usuarioId === Number(id))
+    if (!p) return false
+    if (tipo === 'audio') return p.silenciado || p.semVoz
+    return p.semVideo
+  }
+
+  // ---- modo direto: uma conexão com cada pessoa ----
+
+  sincronizarPares() {
+    const ids = new Set(this.participantes.map((p) => p.usuarioId).filter((id) => id !== this.eu))
+    const antes = this.pares.size
+    for (const id of [...this.pares.keys()]) if (!ids.has(id)) this.fecharPar(id)
+    if (this.pares.size < antes) this.ajustarQualidade() // menos cópias: cada uma pode ter mais qualidade
+    // quem tem o id menor liga; o outro espera a oferta
+    for (const id of ids) if (!this.pares.has(id) && this.eu < id) this.ligarPara(id, 1, 0)
+  }
+
+  novoPar(id, n, inicia) {
+    this.fecharPar(id)
+    const pc = new RTCPeerConnection({ iceServers: this.ice })
+    const par = { id, n, pc, inicia, fila: Promise.resolve() }
+    pc.onicecandidate = (e) => e.candidate && this.mandarPar(id, { tipo: 'ice', n, candidato: e.candidate.toJSON() })
+    pc.ontrack = (e) => {
+      const tipo = TIPOS[pc.getTransceivers().indexOf(e.transceiver)]
+      if (!tipo || this.pares.get(id) !== par) return
+      const atual = (this.remotos[id] ||= {})
+      atual[tipo] = new MediaStream([e.track])
+      if (tipo === 'audio') this.medir(id, atual.audio)
+      this.aoMudar()
+    }
+    pc.onconnectionstatechange = () => {
+      if (this.pares.get(id) !== par) return
+      // caiu (troca de rede, por exemplo): quem ligou tenta de novo algumas vezes
+      if (pc.connectionState === 'failed' && inicia && par.tentativas < 5) {
+        setTimeout(() => this.pares.get(id) === par && !this.fechada && this.ligarPara(id, n + 1, par.tentativas + 1), 1000 * (par.tentativas + 1))
+      }
+      this.aoMudar()
+    }
+    this.pares.set(id, par)
+    return par
+  }
+
+  async ligarPara(id, n, tentativas) {
+    const par = this.novoPar(id, n, true)
+    par.tentativas = tentativas
+    const pc = par.pc
+    try {
+      for (const tipo of TIPOS) pc.addTransceiver(this.faixas[tipo] || tipoDeMidia(tipo), { direction: 'sendrecv' })
+      await pc.setLocalDescription(await pc.createOffer())
+      if (this.pares.get(id) !== par) return
+      this.mandarPar(id, { tipo: 'oferta', n, sdp: pc.localDescription.sdp })
+      await this.ajustarQualidade()
+    } catch (e) {
+      console.warn('voz: ligar direto', e)
+    }
+  }
+
+  sinal(de, s) {
+    if (!s || this.modo !== 'direto') return
+    if (s.tipo === 'oferta') {
+      const par = this.novoPar(de, s.n, false)
+      par.tentativas = 0
+      const pc = par.pc
+      par.fila = par.fila
+        .then(async () => {
+          await pc.setRemoteDescription({ type: 'offer', sdp: s.sdp })
+          const ts = pc.getTransceivers()
+          for (let i = 0; i < ts.length && i < TIPOS.length; i++) {
+            ts[i].direction = 'sendrecv'
+            await ts[i].sender.replaceTrack(this.faixas[TIPOS[i]] || null)
+          }
+          await pc.setLocalDescription(await pc.createAnswer())
+          if (this.pares.get(de) !== par) return
+          this.mandarPar(de, { tipo: 'resposta', n: s.n, sdp: pc.localDescription.sdp })
+          for (const c of (this.iceAntecipado[de] || []).filter((c) => c.n === s.n)) pc.addIceCandidate(c.candidato).catch(() => {})
+          delete this.iceAntecipado[de]
+          await this.ajustarQualidade()
+        })
+        .catch((e) => console.warn('voz: oferta direta', e))
+      return
+    }
+    const par = this.pares.get(de)
+    if (!par || par.n !== s.n) {
+      // candidato que chegou antes da oferta: guarda para depois
+      if (s.tipo === 'ice' && (!par || s.n > par.n)) (this.iceAntecipado[de] ||= []).push(s)
+      return
+    }
+    par.fila = par.fila
+      .then(() => (s.tipo === 'resposta' ? par.pc.setRemoteDescription({ type: 'answer', sdp: s.sdp }) : par.pc.addIceCandidate(s.candidato)))
+      .catch(() => {})
+  }
+
+  mandarPar(para, sinal) {
+    this.mandar('VOZ_P2P', { para, sinal })
+  }
+
+  fecharPar(id) {
+    const par = this.pares.get(id)
+    if (!par) return
+    this.pares.delete(id)
+    par.pc.onconnectionstatechange = null
+    par.pc.close()
+    delete this.remotos[id]
+    delete this.niveis[id]
+  }
+
+  // Todos os "envios" de um tipo de faixa: o da conexão com o servidor e o de cada conexão direta.
+  envios(tipo) {
+    const lista = []
+    const t = this.transceptor(tipo)
+    if (t) lista.push(t.sender)
+    const i = TIPOS.indexOf(tipo)
+    for (const par of this.pares.values()) {
+      const tp = par.pc.getTransceivers()[i]
+      if (tp) lista.push(tp.sender)
+    }
+    return lista
   }
 
   // Limites de envio: a tela pode gastar bem mais banda que a câmera. No modo "fluido",
   // o navegador baixa a resolução antes de baixar os quadros por segundo; no "nítido",
   // faz o contrário (melhor para texto e código parado).
+  // No modo direto cada pessoa recebe uma cópia, então o limite de cada uma diminui
+  // conforme a sala cresce, para não estourar o upload de quem manda.
   async ajustarQualidade() {
+    const copias = Math.max(1, this.pares.size)
+    const dividir = (maximo, total, minimo) => Math.max(minimo, Math.min(maximo, Math.round(total / copias)))
     const regras = {
-      camera: { maxBitrate: 900_000, maxFramerate: 30, preferencia: 'balanced' },
-      telaAudio: { maxBitrate: 128_000 }, // som da tela com qualidade de música
+      camera: { maxBitrate: dividir(600_000, 1_800_000, 250_000), maxFramerate: 24, preferencia: 'balanced' },
+      telaAudio: { maxBitrate: 96_000 }, // som da tela com qualidade de música
       tela:
         this.modoTela === 'nitido'
-          ? { maxBitrate: 2_500_000, maxFramerate: 15, preferencia: 'maintain-resolution' }
-          : { maxBitrate: 3_500_000, maxFramerate: 30, preferencia: 'maintain-framerate' },
+          ? { maxBitrate: dividir(1_200_000, 3_000_000, 500_000), maxFramerate: 10, preferencia: 'maintain-resolution' }
+          : { maxBitrate: dividir(2_000_000, 4_000_000, 700_000), maxFramerate: 30, preferencia: 'maintain-framerate' },
     }
     for (const [tipo, r] of Object.entries(regras)) {
-      const envio = this.transceptor(tipo)?.sender
-      if (!envio?.track) continue
-      try {
-        const p = envio.getParameters()
-        if (!p.encodings?.length) p.encodings = [{}]
-        p.encodings[0].maxBitrate = r.maxBitrate
-        if (r.maxFramerate) p.encodings[0].maxFramerate = r.maxFramerate
-        if (r.preferencia) p.degradationPreference = r.preferencia
-        await envio.setParameters(p)
-      } catch {
-        // navegador sem suporte a algum ajuste: segue com o padrão dele
+      for (const envio of this.envios(tipo)) {
+        if (!envio.track) continue
+        try {
+          const p = envio.getParameters()
+          if (!p.encodings?.length) p.encodings = [{}]
+          p.encodings[0].maxBitrate = r.maxBitrate
+          if (r.maxFramerate) p.encodings[0].maxFramerate = r.maxFramerate
+          if (r.preferencia) p.degradationPreference = r.preferencia
+          await envio.setParameters(p)
+        } catch {
+          // navegador sem suporte a algum ajuste (ou conexão ainda negociando): segue com o padrão
+        }
       }
     }
   }
@@ -224,7 +401,7 @@ class Sessao {
     if (antiga && antiga !== faixa) antiga.stop()
     this.faixas[tipo] = faixa
     if (tipo === 'camera' || tipo === 'tela') this.locais[tipo] = faixa ? new MediaStream([faixa]) : null
-    await this.transceptor(tipo)?.sender.replaceTrack(faixa)
+    await Promise.all(this.envios(tipo).map((e) => e.replaceTrack(faixa).catch(() => {})))
     if (faixa) await this.ajustarQualidade()
   }
 
@@ -271,7 +448,8 @@ class Sessao {
   sair() {
     this.fechada = true
     this.ws?.close()
-    this.pc?.close()
+    this.fecharServidor()
+    for (const id of [...this.pares.keys()]) this.fecharPar(id)
     for (const f of Object.values(this.faixas)) f?.stop()
     this.proc?.destruir()
     this.audio?.close().catch(() => {})
@@ -484,6 +662,7 @@ export function VozProvider({ children }) {
     ...estado,
     falando,
     remotos: s?.remotos || {},
+    modo: s?.modo || null,
     local: s?.locais || { camera: null, tela: null },
     entrar,
     sair,
@@ -502,8 +681,8 @@ export function VozProvider({ children }) {
       <div hidden>
         {Object.entries(s?.remotos || {}).map(([id, r]) => (
           <span key={id}>
-            {r.audio && <Audio stream={r.audio} mudo={estado.surdo} />}
-            {r.telaAudio && <Audio stream={r.telaAudio} mudo={estado.surdo} />}
+            {r.audio && <Audio stream={r.audio} mudo={estado.surdo || s.bloqueado(id, 'audio')} />}
+            {r.telaAudio && <Audio stream={r.telaAudio} mudo={estado.surdo || s.bloqueado(id, 'telaAudio')} />}
           </span>
         ))}
       </div>

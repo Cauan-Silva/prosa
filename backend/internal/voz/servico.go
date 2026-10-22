@@ -38,11 +38,15 @@ type Opcoes struct {
 	Endereco    string // ENDERECO_PUBLICO desta instância (para redirecionar a sala certa)
 	Instancia   string
 
+	Cloudflare  *TurnCloudflare // TURN do Cloudflare (credenciais temporárias); tem prioridade
 	TurnURLs    []string
 	TurnUsuario string
 	TurnSenha   string
-	PortaUDP    int    // 0 = portas aleatórias
-	IPPublico   string // anunciado nos candidatos (atrás de NAT/Docker)
+	PortaUDP    int // 0 = portas aleatórias
+	// MaxDireto: salas com até este número de pessoas trocam a mídia direto entre os
+	// navegadores (sem passar pelo servidor). 0 = sempre pelo servidor.
+	MaxDireto int
+	IPPublico string // anunciado nos candidatos (atrás de NAT/Docker)
 }
 
 // ICE é um servidor STUN/TURN no formato que o navegador entende.
@@ -53,11 +57,10 @@ type ICE struct {
 }
 
 type SFU struct {
-	o           Opcoes
-	api         *webrtc.API
-	iceServidor []webrtc.ICEServer
-	iceCliente  []ICE
-	coord       Coordenador
+	o          Opcoes
+	api        *webrtc.API
+	iceCliente []ICE
+	coord      Coordenador
 
 	mu    sync.Mutex
 	salas map[int64]*Sala // canal -> sala
@@ -75,9 +78,6 @@ func Novo(o Opcoes) (*SFU, error) {
 		ices = append(ices, ICE{URLs: o.TurnURLs, Username: o.TurnUsuario, Credential: o.TurnSenha})
 	}
 	s.iceCliente = ices
-	for _, i := range ices {
-		s.iceServidor = append(s.iceServidor, webrtc.ICEServer{URLs: i.URLs, Username: i.Username, Credential: i.Credential})
-	}
 
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterDefaultCodecs(); err != nil {
@@ -153,8 +153,31 @@ func (s *SFU) Info(w http.ResponseWriter, r *http.Request) error {
 	if dono, err := s.coord.Dono(r.Context(), canalID); err == nil && dono != "" && dono != s.o.Endereco {
 		endereco = dono
 	}
-	api.Responder(w, http.StatusOK, map[string]any{"endereco": endereco, "ice": s.iceCliente})
+	api.Responder(w, http.StatusOK, map[string]any{"endereco": endereco, "ice": s.servidoresICE(r.Context())})
 	return nil
+}
+
+// servidoresICE devolve STUN/TURN para o navegador: credenciais temporárias do Cloudflare,
+// se configurado, ou o TURN fixo das variáveis de ambiente.
+func (s *SFU) servidoresICE(ctx context.Context) []ICE {
+	if s.o.Cloudflare != nil {
+		ices, err := s.o.Cloudflare.Servidores(ctx)
+		if err != nil {
+			slog.Warn("voz: TURN do Cloudflare", "erro", err)
+		}
+		if len(ices) > 0 {
+			return ices
+		}
+	}
+	return s.iceCliente
+}
+
+func paraPion(ices []ICE) []webrtc.ICEServer {
+	saida := make([]webrtc.ICEServer, 0, len(ices))
+	for _, i := range ices {
+		saida = append(saida, webrtc.ICEServer{URLs: i.URLs, Username: i.Username, Credential: i.Credential})
+	}
+	return saida
 }
 
 // ---- conexão de voz ----
@@ -207,7 +230,7 @@ func (s *SFU) Conectar(w http.ResponseWriter, r *http.Request) {
 	defer fechar()
 	perm := ac.NoCanal(canalID)
 	p := &participante{
-		sala: sala, ws: ws, envio: make(chan mensagem, 256), fechar: fechar, perm: perm,
+		sala: sala, ws: ws, envio: make(chan mensagem, 512), fechar: fechar, perm: perm,
 		estado: Estado{UsuarioID: eu.UsuarioID, Nome: eu.Nome, Mudo: !perm.Tem(permissoes.Falar)},
 	}
 	if nome := apelido(ctx, s.o.DB, ac.ServidorID, eu.UsuarioID); nome != "" {
@@ -238,7 +261,7 @@ func (s *SFU) Conectar(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	p.mandar("VOZ_PRONTO", map[string]any{"canalId": canalID, "permissoes": uint64(perm), "ice": s.iceCliente})
+	p.mandar("VOZ_PRONTO", map[string]any{"canalId": canalID, "usuarioId": eu.UsuarioID, "permissoes": uint64(perm), "ice": s.servidoresICE(ctx)})
 	if err := sala.entrar(vida, p); err != nil {
 		slog.Error("voz: entrar", "erro", err)
 		sala.sair(p)
@@ -276,7 +299,10 @@ func (s *SFU) abrirSala(ctx context.Context, servidorID, canalID int64) (*Sala, 
 	defer s.mu.Unlock()
 	sala := s.salas[canalID]
 	if sala == nil {
-		sala = &Sala{sfu: s, ServidorID: servidorID, CanalID: canalID, participantes: map[int64]*participante{}, faixas: map[string]*faixa{}}
+		sala = &Sala{sfu: s, ServidorID: servidorID, CanalID: canalID, modo: modoSFU, participantes: map[int64]*participante{}, faixas: map[string]*faixa{}}
+		if s.o.MaxDireto > 0 {
+			sala.modo = modoDireto
+		}
 		s.salas[canalID] = sala
 		if s.vigia[servidorID] == 0 {
 			s.o.Hub.Assinar(eventos.TopicoServidor(servidorID), s)
@@ -316,7 +342,12 @@ func (s *SFU) esvaziou(sala *Sala) {
 
 // avisar conta para todo mundo do servidor quem está na sala.
 func (s *SFU) avisar(ctx context.Context, sala *Sala) {
-	estados := sala.estados()
+	estados, modo, ps := sala.retrato()
+	// Quem está na sala recebe pela própria conexão de voz (mais rápido que o gateway e
+	// com o modo junto: no direto, cada navegador liga para os outros dessa lista).
+	for _, p := range ps {
+		p.mandar("VOZ_SALA", map[string]any{"modo": modo, "participantes": estados})
+	}
 	if err := s.coord.GravarEstado(ctx, sala.ServidorID, sala.CanalID, estados); err != nil {
 		slog.Warn("voz: gravar estado", "erro", err)
 	}

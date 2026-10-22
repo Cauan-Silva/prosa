@@ -90,17 +90,22 @@ func rodar() error {
 	}
 
 	emissor := auth.NovoEmissor(cfg.SegredoJWT)
+	var cloudflare *voz.TurnCloudflare
+	if cfg.CFTurnID != "" && cfg.CFTurnToken != "" {
+		cloudflare = &voz.TurnCloudflare{ChaveID: cfg.CFTurnID, Token: cfg.CFTurnToken}
+		slog.Info("voz: usando o TURN do Cloudflare")
+	}
 	sfu, err := voz.Novo(voz.Opcoes{
 		DB: db, Emissor: emissor, Hub: hub, Publicador: publicador, Coordenador: coord,
 		Origens: cfg.OrigensWS, Endereco: cfg.EnderecoPublico, Instancia: cfg.Instancia,
-		TurnURLs: cfg.TurnURLs, TurnUsuario: cfg.TurnUsuario, TurnSenha: cfg.TurnSenha,
-		PortaUDP: cfg.PortaUDP, IPPublico: cfg.IPPublico,
+		TurnURLs: cfg.TurnURLs, TurnUsuario: cfg.TurnUsuario, TurnSenha: cfg.TurnSenha, Cloudflare: cloudflare,
+		PortaUDP: cfg.PortaUDP, IPPublico: cfg.IPPublico, MaxDireto: cfg.MaxDireto,
 	})
 	if err != nil {
 		return err
 	}
 	go sfu.Manter(ctx)
-	if len(cfg.TurnURLs) == 0 {
+	if len(cfg.TurnURLs) == 0 && cloudflare == nil {
 		slog.Warn("voz sem TURN: funciona na mesma rede ou com UDP liberado; em hospedagens sem UDP (ex.: Render), configure TURN_URLS")
 	}
 

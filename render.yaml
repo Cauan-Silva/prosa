@@ -26,6 +26,11 @@ services:
       - key: S3_SEGREDO
         sync: false
       # Voz: o Render não recebe UDP, então a mídia precisa passar por um servidor TURN.
+      # Recomendado: TURN do Cloudflare (1.000 GB grátis/mês). Ou um TURN fixo nas TURN_*.
+      - key: CF_TURN_ID
+        sync: false
+      - key: CF_TURN_TOKEN
+        sync: false
       - key: TURN_URLS
         sync: false
       - key: TURN_USUARIO
