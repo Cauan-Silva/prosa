@@ -10,7 +10,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { api, lerToken } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
-import { aoMudar, preferencias, usePreferencias } from './preferencias.js'
+import { aoMudar, mudar, preferencias, usePreferencias } from './preferencias.js'
 import { Processador, abrirMicrofone } from './microfone.js'
 
 const Contexto = createContext(null)
@@ -239,7 +239,7 @@ class Sessao {
     const p = this.participantes.find((x) => x.usuarioId === Number(id))
     if (!p) return false
     if (tipo === 'audio') return p.silenciado || p.semVoz
-    return p.semVideo
+    return p.semVideo || !p.tela // som da tela só enquanto a pessoa compartilha
   }
 
   // ---- modo direto: uma conexão com cada pessoa ----
@@ -471,7 +471,28 @@ function restricoesDeCamera(voz) {
   return { width: 640, height: 360, frameRate: 24, deviceId: voz.camera ? { exact: voz.camera } : undefined }
 }
 
+/** Volume que eu escolhi para alguém (ou para o som da tela de alguém: chave "t" + id). */
+export function ganhoDe(voz, chave) {
+  const k = String(chave)
+  if ((voz.silenciados || []).includes(k)) return 0
+  return voz.volumes?.[k] ?? 1
+}
+
+/** Muda o volume de alguém só para mim (0 a 2 = 0% a 200%). */
+export function mudarVolume(chave, valor) {
+  const voz = preferencias().voz
+  mudar('voz', { volumes: { ...voz.volumes, [String(chave)]: Math.max(0, Math.min(2, valor)) } })
+}
+
+/** Silencia (ou volta a ouvir) alguém só para mim. */
+export function alternarSilencioLocal(chave) {
+  const k = String(chave)
+  const lista = preferencias().voz.silenciados || []
+  mudar('voz', { silenciados: lista.includes(k) ? lista.filter((x) => x !== k) : [...lista, k] })
+}
+
 export function VozProvider({ children }) {
+  const prefs = usePreferencias()
   const [estado, setEstado] = useState(inicial)
   const [, setVersao] = useState(0)
   const [falando, setFalando] = useState({})
@@ -692,8 +713,8 @@ export function VozProvider({ children }) {
       <div hidden>
         {Object.entries(s?.remotos || {}).map(([id, r]) => (
           <span key={id}>
-            {r.audio && <Audio stream={r.audio} mudo={estado.surdo || s.bloqueado(id, 'audio')} />}
-            {r.telaAudio && <Audio stream={r.telaAudio} mudo={estado.surdo || s.bloqueado(id, 'telaAudio')} />}
+            {r.audio && <Audio stream={r.audio} mudo={estado.surdo || s.bloqueado(id, 'audio')} ganho={ganhoDe(prefs.voz, id)} />}
+            {r.telaAudio && <Audio stream={r.telaAudio} mudo={estado.surdo || s.bloqueado(id, 'telaAudio')} ganho={ganhoDe(prefs.voz, `t${id}`)} />}
           </span>
         ))}
       </div>
@@ -701,19 +722,70 @@ export function VozProvider({ children }) {
   )
 }
 
-function Audio({ stream, mudo }) {
+// Um AudioContext para todos os volumes acima de 100% (o <audio> só vai até 100%).
+let contextoSaida = null
+
+/**
+ * Toca a voz de alguém. Até 100% usa o volume do próprio <audio>; acima disso passa por
+ * um ganho do Web Audio. O <audio> mudo com o som original continua existindo porque o
+ * Chrome só entrega áudio do WebRTC ao Web Audio se ele também estiver tocando num elemento.
+ */
+function Audio({ stream, mudo, ganho = 1 }) {
   const ref = useRef(null)
+  const bruto = useRef(null)
+  const ganhoNo = useRef(null)
   const { voz } = usePreferencias()
-  useEffect(() => {
-    if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream
-  }, [stream])
+  const total = Math.max(0, (voz.volumeSaida ?? 1) * ganho)
+  const amplificar = total > 1
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    el.volume = Math.min(1, Math.max(0, voz.volumeSaida ?? 1))
-    if (el.setSinkId && voz.saida !== undefined) el.setSinkId(voz.saida || '').catch(() => {})
-  }, [voz.volumeSaida, voz.saida])
-  return <audio ref={ref} autoPlay muted={mudo} />
+    if (!amplificar) {
+      if (el.srcObject !== stream) el.srcObject = stream
+      ganhoNo.current = null
+      return
+    }
+    try {
+      contextoSaida ||= new AudioContext()
+      contextoSaida.resume().catch(() => {})
+      const fonte = contextoSaida.createMediaStreamSource(stream)
+      const g = contextoSaida.createGain()
+      const destino = contextoSaida.createMediaStreamDestination()
+      fonte.connect(g).connect(destino)
+      ganhoNo.current = g
+      el.srcObject = destino.stream
+      if (bruto.current) bruto.current.srcObject = stream
+      return () => {
+        fonte.disconnect()
+        g.disconnect()
+        ganhoNo.current = null
+      }
+    } catch {
+      el.srcObject = stream // sem Web Audio: fica no máximo de 100%
+    }
+  }, [stream, amplificar])
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (ganhoNo.current) {
+      ganhoNo.current.gain.value = total
+      el.volume = 1
+    } else el.volume = Math.min(1, total)
+  }, [total, amplificar])
+
+  useEffect(() => {
+    const el = ref.current
+    if (el?.setSinkId && voz.saida !== undefined) el.setSinkId(voz.saida || '').catch(() => {})
+  }, [voz.saida])
+
+  return (
+    <>
+      <audio ref={ref} autoPlay muted={mudo || total === 0} />
+      {amplificar && <audio ref={bruto} autoPlay muted />}
+    </>
+  )
 }
 
 export const useVoz = () => useContext(Contexto)

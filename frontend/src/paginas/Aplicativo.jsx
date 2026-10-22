@@ -14,6 +14,7 @@ import Icone from '../componentes/Icone.jsx'
 import { useEstado } from '../servicos/estado.jsx'
 import { navegar } from '../servicos/rota.jsx'
 import { api } from '../servicos/api.js'
+import { useNovaVersao } from '../servicos/versao.js'
 
 const CHAVE_CANAIS = 'prosa.ultimosCanais'
 function lerUltimos() {
@@ -101,6 +102,8 @@ export default function Aplicativo({ caminho }) {
   const abrir = (tipo, extra = {}) => setModal({ tipo, ...extra })
   const fechar = () => setModal(null)
 
+  const novaVersao = useNovaVersao()
+
   if (!estado.pronto) {
     return (
       <div className="carregando-tela">
@@ -111,10 +114,17 @@ export default function Aplicativo({ caminho }) {
 
   return (
     <div className={`app painel-${visao ? painel : 'canais'} ${mostrarMembros && visao ? 'com-membros' : ''}`}>
-      {estado.conexao !== 'online' && (
+      {estado.conexao !== 'online' ? (
         <div className="faixa-conexao" role="status">
           Sem conexão. Tentando reconectar…
         </div>
+      ) : (
+        novaVersao && (
+          <div className="faixa-conexao faixa-versao" role="status">
+            Saiu uma versão nova do Prosa.
+            <button onClick={() => location.reload()}>Atualizar agora</button>
+          </div>
+        )
       )}
 
       <nav className="trilho" aria-label="Servidores">

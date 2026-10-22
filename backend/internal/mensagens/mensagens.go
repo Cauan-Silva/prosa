@@ -84,6 +84,7 @@ type Mensagem struct {
 	Reacoes       []Reacao   `json:"reacoes"`
 	Anexos        []Anexo    `json:"anexos"`
 	EditadaEm     *time.Time `json:"editadaEm,omitempty"`
+	FixadaEm      *time.Time `json:"fixadaEm,omitempty"`
 	CriadaEm      time.Time  `json:"criadaEm"`
 }
 
@@ -139,7 +140,7 @@ func eventoDoCanal(tipo string, servidorID, canalID int64, dados any) eventos.Ev
 
 const consultaMensagens = `
 	SELECT m.id, m.canal_id, c.servidor_id, m.autor_id, u.nome_usuario, u.nome_exibicao,
-	       m.conteudo, m.responde_a, m.menciona_todos, m.editada_em, m.criada_em,
+	       m.conteudo, m.responde_a, m.menciona_todos, m.editada_em, m.fixada_em, m.criada_em,
 	       r.autor_id, COALESCE(ru.nome_exibicao, ''), COALESCE(left(r.conteudo, 120), '')
 	FROM mensagens m
 	JOIN canais c ON c.id = m.canal_id
@@ -158,10 +159,10 @@ func (s *Servico) lerVarias(ctx context.Context, consulta string, args ...any) (
 		var m Mensagem
 		var autorID, respID, respAutor sql.NullInt64
 		var nomeUsuario, nomeExibicao sql.NullString
-		var editada sql.NullTime
+		var editada, fixada sql.NullTime
 		var respNome, respTrecho string
 		if err := linhas.Scan(&m.ID, &m.CanalID, &m.ServidorID, &autorID, &nomeUsuario, &nomeExibicao,
-			&m.Conteudo, &respID, &m.MencionaTodos, &editada, &m.CriadaEm, &respAutor, &respNome, &respTrecho); err != nil {
+			&m.Conteudo, &respID, &m.MencionaTodos, &editada, &fixada, &m.CriadaEm, &respAutor, &respNome, &respTrecho); err != nil {
 			return nil, err
 		}
 		if autorID.Valid {
@@ -175,6 +176,9 @@ func (s *Servico) lerVarias(ctx context.Context, consulta string, args ...any) (
 		}
 		if editada.Valid {
 			m.EditadaEm = &editada.Time
+		}
+		if fixada.Valid {
+			m.FixadaEm = &fixada.Time
 		}
 		m.Mencoes, m.Reacoes, m.Anexos = []int64{}, []Reacao{}, []Anexo{}
 		lista = append(lista, m)

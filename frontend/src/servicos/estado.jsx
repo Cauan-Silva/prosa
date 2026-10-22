@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { api, enderecoGateway } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
 import { carregarDaConta, preferencias } from './preferencias.js'
+import { verificarVersao } from './versao.js'
 
 const Contexto = createContext(null)
 
@@ -295,6 +296,8 @@ export function EstadoProvider({ children }) {
         if (e.t === 'PRONTO') {
           despachar(acao)
           carregarDaConta(e.d.usuario?.preferencias)
+          // reconectou (muitas vezes porque o servidor foi atualizado): confere se o site mudou
+          setTimeout(verificarVersao, 3000)
           // Depois de reconectar, busca o que chegou nos canais abertos enquanto estava fora.
           for (const [canal, dados] of Object.entries(estadoRef.current.mensagens)) {
             const ultima = dados.lista.filter((x) => !x.pendente).at(-1)

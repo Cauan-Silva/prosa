@@ -28,6 +28,8 @@ export const PADRAO = {
     modo: 'voz', // voz (detecção) | ptt (pressionar para falar)
     teclaPtt: 'KeyV',
     volumeSaida: 1,
+    volumes: {}, // volume de cada pessoa (id -> 0..2) e do som da tela de cada uma ("t" + id)
+    silenciados: [], // quem eu silenciei só para mim (ids, ou "t" + id para o som da tela)
   },
   notificacoes: {
     area: false, // notificações do sistema quando a aba está em segundo plano

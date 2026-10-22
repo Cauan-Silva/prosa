@@ -1,10 +1,31 @@
 // Mostra o texto das mensagens: menções, links e um pouco de formatação
-// (**negrito**, *itálico*, ~~riscado~~, `código` e blocos ```código```).
+// (**negrito**, *itálico*, ~~riscado~~, ||spoiler||, `código` e blocos ```código```).
 // Tudo vira elementos do React, nunca HTML cru, então não há como injetar código.
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 
-const padrao =
-  /(```[\s\S]+?```)|(`[^`\n]+`)|(<@&?\d{1,19}>)|(\B@todos\b)|(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'])|(\*\*[^*\n]+\*\*)|(~~[^~\n]+~~)|(\*[^*\n]+\*|_[^_\n]+_)/g
+const URL_RE = String.raw`https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'|]`
+const padrao = new RegExp(
+  String.raw`(\x60\x60\x60[\s\S]+?\x60\x60\x60)|(\x60[^\x60\n]+\x60)|(<@&?\d{1,19}>)|(\B@todos\b)|(<${URL_RE}>)|(${URL_RE})|(\|\|[\s\S]+?\|\|)|(\*\*[^*\n]+\*\*)|(~~[^~\n]+~~)|(\*[^*\n]+\*|_[^_\n]+_)`,
+  'g',
+)
+
+/**
+ * Links que ganham cartão de prévia: fora de código e de spoiler, e sem os <> em volta
+ * (como no Discord, <https://...> manda o link sem prévia).
+ */
+export function linksComPrevia(conteudo, max = 2) {
+  const limpo = conteudo
+    .replace(/```[\s\S]+?```/g, ' ')
+    .replace(/`[^`\n]+`/g, ' ')
+    .replace(/\|\|[\s\S]+?\|\|/g, ' ')
+    .replace(new RegExp(`<${URL_RE}>`, 'g'), ' ')
+  const vistos = []
+  for (const m of limpo.matchAll(new RegExp(URL_RE, 'g'))) {
+    if (!vistos.includes(m[0])) vistos.push(m[0])
+    if (vistos.length >= max) break
+  }
+  return vistos
+}
 
 export function Texto({ conteudo, membros, cargos, eu, aoMencionar }) {
   return <>{partes(conteudo, { membros, cargos, eu, aoMencionar }, 0)}</>
@@ -22,15 +43,39 @@ function partes(texto, ctx, nivel) {
     else if (m[2]) saida.push(<code key={k}>{t.slice(1, -1)}</code>)
     else if (m[3]) saida.push(mencao(t, ctx, k))
     else if (m[4]) saida.push(<span key={k} className="mencao mencao-todos">@todos</span>)
-    else if (m[5]) saida.push(<a key={k} href={t} target="_blank" rel="noopener noreferrer nofollow">{t}</a>)
-    else if (nivel < 3 && m[6]) saida.push(<strong key={k}>{partes(t.slice(2, -2), ctx, nivel + 1)}</strong>)
-    else if (nivel < 3 && m[7]) saida.push(<s key={k}>{partes(t.slice(2, -2), ctx, nivel + 1)}</s>)
-    else if (nivel < 3 && m[8]) saida.push(<em key={k}>{partes(t.slice(1, -1), ctx, nivel + 1)}</em>)
+    else if (m[5]) saida.push(<a key={k} href={t.slice(1, -1)} target="_blank" rel="noopener noreferrer nofollow">{t.slice(1, -1)}</a>)
+    else if (m[6]) saida.push(<a key={k} href={t} target="_blank" rel="noopener noreferrer nofollow">{t}</a>)
+    else if (nivel < 3 && m[7]) saida.push(<Spoiler key={k}>{partes(t.slice(2, -2), ctx, nivel + 1)}</Spoiler>)
+    else if (nivel < 3 && m[8]) saida.push(<strong key={k}>{partes(t.slice(2, -2), ctx, nivel + 1)}</strong>)
+    else if (nivel < 3 && m[9]) saida.push(<s key={k}>{partes(t.slice(2, -2), ctx, nivel + 1)}</s>)
+    else if (nivel < 3 && m[10]) saida.push(<em key={k}>{partes(t.slice(1, -1), ctx, nivel + 1)}</em>)
     else saida.push(t)
     ultimo = m.index + t.length
   }
   if (ultimo < texto.length) saida.push(quebras(texto.slice(ultimo), i++))
   return saida
+}
+
+/** Texto escondido até alguém clicar. */
+function Spoiler({ children }) {
+  const [visivel, setVisivel] = useState(false)
+  if (visivel) return <span className="spoiler visivel">{children}</span>
+  return (
+    <span
+      className="spoiler"
+      role="button"
+      tabIndex={0}
+      aria-label="Spoiler: clique para mostrar"
+      title="Spoiler: clique para mostrar"
+      onClick={(e) => {
+        e.stopPropagation()
+        setVisivel(true)
+      }}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setVisivel(true))}
+    >
+      <span aria-hidden="true">{children}</span>
+    </span>
+  )
 }
 
 function quebras(texto, chave) {

@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import Icone from './Icone.jsx'
 import { Avatar } from './Azulejo.jsx'
-import { Texto } from '../servicos/texto.jsx'
+import Previa from './Previa.jsx'
+import { Texto, linksComPrevia } from '../servicos/texto.jsx'
 import { corDe, nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api, enderecoAnexo } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
@@ -12,6 +13,18 @@ import { tocar } from '../servicos/sons.js'
 export const abrirPerfil = (usuarioId) => window.dispatchEvent(new CustomEvent('prosa:perfil', { detail: { usuarioId } }))
 
 export const RAPIDOS = ['👍', '❤️', '😂', '😮', '🎉', '🙏', '👀', '🔥']
+
+/** Rola até uma mensagem (se ela estiver carregada) e pisca um destaque nela. */
+export function irParaMensagem(id) {
+  const el = document.getElementById(`m${id}`)
+  if (!el) return false
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.classList.remove('destaque')
+  void el.offsetWidth // reinicia a animação se clicar de novo
+  el.classList.add('destaque')
+  setTimeout(() => el.classList.remove('destaque'), 2000)
+  return true
+}
 
 function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoResponder }) {
   const { estado, despachar } = useEstado()
@@ -39,6 +52,15 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
     }
   }
 
+  async function alternarFixada() {
+    try {
+      if (m.fixadaEm) await api.desfixar(canal.id, m.id)
+      else await api.fixar(canal.id, m.id)
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
   async function apagar(e) {
     if (!e.shiftKey && !confirm('Apagar esta mensagem? Não dá para desfazer.')) return
     try {
@@ -58,17 +80,15 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
     }
   }
 
-  const classes = ['mensagem', junto && 'junto', mencionaMe && 'me-menciona', m.pendente && 'pendente', m.falhou && 'falhou']
+  const links = m.pendente || !m.conteudo ? [] : linksComPrevia(m.conteudo)
+  const classes = ['mensagem', junto && 'junto', mencionaMe && 'me-menciona', m.fixadaEm && 'fixada', m.pendente && 'pendente', m.falhou && 'falhou']
     .filter(Boolean)
     .join(' ')
 
   return (
     <article className={classes} id={`m${m.id}`} aria-label={`${nome}, ${quando(m.criadaEm)}`}>
       {m.respondeA && (
-        <button
-          className="resposta-a"
-          onClick={() => document.getElementById(`m${m.respondeA.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-        >
+        <button className="resposta-a" onClick={() => irParaMensagem(m.respondeA.id)}>
           <Icone nome="responder" tamanho={14} />
           <strong>{m.respondeA.autorNome || 'Conta apagada'}</strong>
           <span>{m.respondeA.trecho || 'mensagem apagada'}</span>
@@ -93,6 +113,11 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
               <time dateTime={m.criadaEm} title={formatarCompleto(m.criadaEm)}>
                 {quando(m.criadaEm)}
               </time>
+              {m.fixadaEm && (
+                <span className="marca-fixada" title="Mensagem fixada">
+                  <Icone nome="fixar" tamanho={13} />
+                </span>
+              )}
             </header>
           )}
           {editando ? (
@@ -109,6 +134,7 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
               </div>
             )
           )}
+          {!editando && links.map((url) => <Previa key={url} url={url} />)}
           {m.anexos?.length > 0 && (
             <div className="anexos">
               {m.anexos.map((a) => (
@@ -158,6 +184,16 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
           {tem(perm, P.EnviarMensagens) && (
             <button className="icone-botao" onClick={() => aoResponder(m)} aria-label="Responder" title="Responder">
               <Icone nome="responder" tamanho={18} />
+            </button>
+          )}
+          {tem(perm, P.GerenciarMensagens) && (
+            <button
+              className={`icone-botao ${m.fixadaEm ? 'ligado' : ''}`}
+              onClick={alternarFixada}
+              aria-label={m.fixadaEm ? 'Desafixar' : 'Fixar'}
+              title={m.fixadaEm ? 'Desafixar do canal' : 'Fixar no canal'}
+            >
+              <Icone nome="fixar" tamanho={18} />
             </button>
           )}
           {minha && (

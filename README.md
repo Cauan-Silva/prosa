@@ -18,8 +18,10 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - **Convites** por link com validade e limite de usos
 
 **Conversa**
-- Mensagens com **respostas**, **menções** (`@pessoa`, `@cargo`, `@todos`) com autocompletar, **reações**, edição e exclusão
-- Formatação: `**negrito**`, `*itálico*`, `~~riscado~~`, `` `código` ``, blocos de código e links
+- Mensagens com **respostas**, **menções** (`@pessoa`, `@cargo`, `@todos`) com autocompletar, **reações**, edição (↑ edita a última) e exclusão
+- **Mensagens fixadas** por canal, com painel para ver todas
+- **Prévia de links** com título, descrição e imagem do site (buscada pelo servidor só em endereços públicos; `<link>` manda sem prévia)
+- Formatação: `**negrito**`, `*itálico*`, `~~riscado~~`, `||spoiler||`, `` `código` ``, blocos de código e links
 - **Anexos** (arrastar, colar ou escolher) com prévia de imagens, vídeo e áudio, guardados num S3 compatível
 - **Quem está digitando**, **quem está online**, mensagens **não lidas** por canal e **menções** em destaque
 - **Busca** em português (“pizzas” acha “pizza”) só nos canais que você pode ler
@@ -28,6 +30,7 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 **Voz**
 - Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas; a tela tem os modos Nítido (mais resolução), Fluido (30 fps) e 60 fps (para jogos e vídeos)
 - Quem está falando acende; dá para silenciar o microfone ou o som, e moderadores silenciam ou tiram alguém da sala
+- **Volume por pessoa** (0 a 200%) e da tela de cada um, e silenciar alguém só para você
 - A voz continua enquanto você navega pelos canais de texto
 
 **Perfil e configurações**
@@ -92,7 +95,7 @@ Duas otimizações vieram do teste: cada evento é convertido em JSON uma vez s�
 - **Segurança:** senhas com PBKDF2-SHA256 e JWT HS256 com a biblioteca padrão, limite de tentativas de login por IP, tipo dos anexos detectado pelo conteúdo, cabeçalhos de segurança (CSP, nosniff, frame-ancestors)
 - **Telas:** React 19 e Vite, sem outras dependências (estado, roteador, WebRTC e formatação de texto escritos à mão)
 - **Infra:** Docker (imagem distroless), docker-compose com 2 instâncias + Caddy + Redis + PostgreSQL, Render, Neon e GitHub Actions
-- **Testes:** 34 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
+- **Testes:** 38 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
 
 ## Como rodar no seu computador
 

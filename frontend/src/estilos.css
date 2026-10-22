@@ -433,6 +433,24 @@ textarea {
   padding: 3px;
 }
 
+.faixa-versao {
+  background: var(--cobalto);
+  color: #fff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 5px;
+}
+.faixa-versao button {
+  background: #fff;
+  color: #111;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
 /* trilho de servidores: azulejos assentados com rejunte */
 .trilho {
   grid-area: trilho;
@@ -2723,4 +2741,152 @@ kbd {
   border-top: 1px solid var(--linha);
   padding-top: 10px;
   margin-top: 12px;
+}
+
+/* ---------- spoiler, prévias de link e mensagens fixadas ---------- */
+
+.spoiler {
+  background: var(--texto);
+  color: transparent;
+  border-radius: 4px;
+  padding: 0 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.spoiler > span {
+  visibility: hidden;
+}
+.spoiler:hover {
+  background: color-mix(in srgb, var(--texto) 85%, transparent);
+}
+.spoiler.visivel {
+  background: color-mix(in srgb, var(--texto) 12%, transparent);
+  color: inherit;
+  cursor: text;
+}
+
+.previa {
+  --cor-previa: var(--cobalto);
+  display: flex;
+  gap: 12px;
+  max-width: 520px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 4px solid var(--cor-previa);
+  background: color-mix(in srgb, var(--linha) 45%, var(--papel));
+}
+.previa-texto {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 3px;
+  align-content: start;
+}
+.previa-site {
+  color: var(--pedra);
+  font-size: 12px;
+}
+.previa-titulo {
+  font-weight: 600;
+  color: var(--cobalto-texto);
+  overflow-wrap: anywhere;
+}
+.previa-descricao {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--pedra);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.previa-imagem img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+.previa-so-imagem {
+  border: 0;
+  padding: 0;
+  background: none;
+  display: inline-block;
+}
+.previa-so-imagem img {
+  max-width: min(400px, 100%);
+  max-height: 300px;
+  border-radius: 8px;
+  display: block;
+}
+@media (max-width: 560px) {
+  .previa-imagem img {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+.marca-fixada {
+  color: var(--pedra);
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: -2px;
+}
+.mensagem.destaque {
+  animation: destaque-msg 2s ease-out;
+}
+@keyframes destaque-msg {
+  0%,
+  30% {
+    background: color-mix(in srgb, var(--ipe) 30%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.sem-animacoes .mensagem.destaque {
+  animation: none;
+  outline: 2px solid var(--ipe);
+}
+.fixadas-painel h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.menu-volume {
+  min-width: 220px;
+}
+.volume-pessoa {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  font-size: 13px;
+}
+.volume-pessoa span {
+  display: flex;
+  justify-content: space-between;
+}
+.volume-pessoa input {
+  width: 100%;
+  accent-color: var(--ipe);
+}
+/* com o menu aberto, o quadro deixa o menu passar da borda */
+.quadro:has(.quadro-moderar .menu) {
+  overflow: visible;
+  z-index: 5;
+}
+.quadro:has(.quadro-moderar .menu) video {
+  border-radius: 12px;
+}
+.quadro-moderar .menu.menu-volume {
+  width: 230px;
+}
+.volume-pessoa input[type='range'] {
+  border: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  height: 20px;
 }

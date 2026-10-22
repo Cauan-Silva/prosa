@@ -10,6 +10,7 @@ require (
 	github.com/pion/rtcp v1.2.15
 	github.com/pion/webrtc/v4 v4.1.6
 	github.com/redis/go-redis/v9 v9.7.3
+	golang.org/x/net v0.35.0
 )
 
 require (
@@ -30,6 +31,5 @@ require (
 	github.com/pion/turn/v4 v4.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 )

@@ -3,6 +3,7 @@ import Icone from './Icone.jsx'
 import Mensagem from './Mensagem.jsx'
 import Compositor from './Compositor.jsx'
 import Busca from './Busca.jsx'
+import Fixadas from './Fixadas.jsx'
 import SalaVoz from './SalaVoz.jsx'
 import { useEstado } from '../servicos/estado.jsx'
 import { api } from '../servicos/api.js'
@@ -14,6 +15,9 @@ const JUNTAR_MS = 7 * 60 * 1000
 export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembros, aoVoltar }) {
   const [busca, setBusca] = useState(null) // termo buscado
   const [termo, setTermo] = useState('')
+  const [fixadas, setFixadas] = useState(false)
+  const { estado } = useEstado()
+  useEffect(() => setFixadas(false), [canal.id])
 
   return (
     <main className="conversa">
@@ -35,6 +39,17 @@ export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembr
           <Icone nome="buscar" tamanho={16} />
           <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder={`Buscar em ${visao.servidor.nome}`} aria-label="Buscar mensagens" />
         </form>
+        {canal.tipo === 'texto' && (
+          <button
+            className={`icone-botao ${fixadas ? 'ligado' : ''}`}
+            onClick={() => setFixadas((f) => !f)}
+            aria-pressed={fixadas}
+            aria-label="Mensagens fixadas"
+            title="Mensagens fixadas"
+          >
+            <Icone nome="fixar" />
+          </button>
+        )}
         <button
           className={`icone-botao ${mostrarMembros ? 'ligado' : ''}`}
           onClick={aoAlternarMembros}
@@ -49,6 +64,9 @@ export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembr
       <div className="conversa-corpo">
         {canal.tipo === 'voz' ? <SalaVoz visao={visao} canal={canal} /> : <CanalTexto visao={visao} canal={canal} />}
         {busca && <Busca visao={visao} termo={busca} aoFechar={() => setBusca(null)} />}
+        {fixadas && !busca && canal.tipo === 'texto' && (
+          <Fixadas visao={visao} canal={canal} membros={estado.membros[visao.servidor.id]} aoFechar={() => setFixadas(false)} />
+        )}
       </div>
     </main>
   )

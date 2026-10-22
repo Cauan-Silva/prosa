@@ -18,6 +18,7 @@ import (
 	"github.com/Cauan-Silva/prosa/internal/gateway"
 	"github.com/Cauan-Silva/prosa/internal/mensagens"
 	"github.com/Cauan-Silva/prosa/internal/presenca"
+	"github.com/Cauan-Silva/prosa/internal/previas"
 	"github.com/Cauan-Silva/prosa/internal/servidores"
 	"github.com/Cauan-Silva/prosa/internal/usuarios"
 	"github.com/Cauan-Silva/prosa/internal/voz"
@@ -155,6 +156,10 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	logado("PUT /api/canais/{canal}/mensagens/{mensagem}/reacoes/{emoji}", m.Reagir)
 	logado("DELETE /api/canais/{canal}/mensagens/{mensagem}/reacoes/{emoji}", m.Desreagir)
 	logado("POST /api/canais/{canal}/lido", m.MarcarLido)
+	logado("PUT /api/canais/{canal}/mensagens/{mensagem}/fixar", m.Fixar)
+	logado("DELETE /api/canais/{canal}/mensagens/{mensagem}/fixar", m.Desfixar)
+	logado("GET /api/canais/{canal}/fixadas", m.Fixadas)
+	logado("GET /api/previa", previas.Novo(o.DB, false).Rota)
 	logado("POST /api/canais/{canal}/anexos", m.EnviarAnexo)
 	// O <img> do navegador não manda o cabeçalho Authorization: o token também pode vir em ?t=
 	mux.Handle("GET /api/anexos/{anexo}/{nome}", tokenNaURL(api.ExigirLogin(o.Emissor, api.Manipulador(m.BaixarAnexo))))

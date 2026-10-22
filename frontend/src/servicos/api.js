@@ -156,6 +156,10 @@ export const api = {
   apagar: (canal, msg) => pedir('DELETE', `${cn(canal)}/mensagens/${msg}`),
   reagir: (canal, msg, emoji) => pedir('PUT', `${cn(canal)}/mensagens/${msg}/reacoes/${encodeURIComponent(emoji)}`),
   desreagir: (canal, msg, emoji) => pedir('DELETE', `${cn(canal)}/mensagens/${msg}/reacoes/${encodeURIComponent(emoji)}`),
+  fixar: (canal, msg) => pedir('PUT', `${cn(canal)}/mensagens/${msg}/fixar`),
+  desfixar: (canal, msg) => pedir('DELETE', `${cn(canal)}/mensagens/${msg}/fixar`),
+  fixadas: (canal) => pedir('GET', `${cn(canal)}/fixadas`),
+  previa: (url) => pedir('GET', `/api/previa?url=${encodeURIComponent(url)}`),
   marcarLido: (canal, mensagemId) => pedir('POST', `${cn(canal)}/lido`, { mensagemId }),
   vozInfo: (canal) => pedir('GET', `${cn(canal)}/voz`),
 }

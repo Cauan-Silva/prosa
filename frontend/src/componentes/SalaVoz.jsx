@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icone from './Icone.jsx'
 import { Avatar } from './Azulejo.jsx'
 import { nomeDe, useEstado } from '../servicos/estado.jsx'
-import { useVoz } from '../servicos/voz.jsx'
+import { alternarSilencioLocal, mudarVolume, useVoz } from '../servicos/voz.jsx'
 import { usePreferencias } from '../servicos/preferencias.js'
 import { P, tem } from '../servicos/permissoes.js'
 
@@ -80,7 +80,17 @@ function Palco({ visao, canal, pessoas }) {
       <div className={`quadros ${focado ? 'com-foco' : ''}`}>
         {focado && (
           <div className="quadro-foco">
-            <Quadro q={focado} falando={falandoDe(voz, focado.p, eu)} nome={nomeDe(membros?.find((m) => m.usuarioId === focado.p.usuarioId)) || focado.p.nome} avatar={membros?.find((m) => m.usuarioId === focado.p.usuarioId)?.avatar} eu={eu} aoClicar={() => setFoco(null)} />
+            <Quadro
+              q={focado}
+              falando={falandoDe(voz, focado.p, eu)}
+              nome={nomeDe(membros?.find((m) => m.usuarioId === focado.p.usuarioId)) || focado.p.nome}
+              avatar={membros?.find((m) => m.usuarioId === focado.p.usuarioId)?.avatar}
+              eu={eu}
+              moderador={moderador && focado.p.usuarioId !== eu}
+              aoModerar={voz.moderar}
+              prefsVoz={prefs.voz}
+              aoClicar={() => setFoco(null)}
+            />
           </div>
         )}
         <div className="grade-quadros" data-qtd={Math.min(outros.length, 9)}>
@@ -94,6 +104,7 @@ function Palco({ visao, canal, pessoas }) {
               avatar={membros?.find((m) => m.usuarioId === q.p.usuarioId)?.avatar}
               moderador={moderador && q.p.usuarioId !== eu}
               aoModerar={voz.moderar}
+              prefsVoz={prefs.voz}
               aoClicar={() => (q.stream ? setFoco(q.chave) : null)}
             />
           ))}
@@ -106,9 +117,14 @@ function Palco({ visao, canal, pessoas }) {
 
 const falandoDe = (voz, p, eu) => !p.mudo && !p.silenciado && !!voz.falando[p.usuarioId === eu ? 'eu' : p.usuarioId]
 
-function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, aoClicar }) {
+function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, aoClicar }) {
   const { p } = q
   const [menu, setMenu] = useState(false)
+  const meu = p.usuarioId === eu
+  // o quadro da tela controla o som da tela; o da pessoa, a voz dela
+  const chave = q.tela ? `t${p.usuarioId}` : String(p.usuarioId)
+  const silenciadoPorMim = (prefsVoz?.silenciados || []).includes(chave)
+  const volume = Math.round((prefsVoz?.volumes?.[chave] ?? 1) * 100)
   return (
     <div className={`quadro ${falando ? 'falando' : ''} ${q.stream ? 'com-video' : ''}`} onClick={aoClicar}>
       {q.stream ? <Video stream={q.stream} espelhar={p.usuarioId === eu && !q.tela} /> : <Avatar nome={nome} id={p.usuarioId} src={avatar} tamanho={72} />}
@@ -118,22 +134,51 @@ function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, aoClicar }
           {q.tela && ' (tela)'}
         </span>
         {(p.mudo || p.silenciado) && <Icone nome="microfone-off" tamanho={16} />}
+        {!meu && silenciadoPorMim && <Icone nome="voz-off" tamanho={16} />}
         {p.surdo && <Icone nome="fone-off" tamanho={16} />}
       </div>
       {p.silenciado && <span className="etiqueta perigo quadro-etiqueta">silenciado</span>}
-      {moderador && !q.tela && (
+      {!meu && (
         <div className="quadro-moderar" onClick={(e) => e.stopPropagation()}>
-          <button className="icone-botao" onClick={() => setMenu((m) => !m)} aria-label={`Moderar ${nome}`} aria-expanded={menu}>
-            <Icone nome="config" tamanho={16} />
+          <button
+            className="icone-botao"
+            onClick={() => setMenu((m) => !m)}
+            aria-label={q.tela ? `Som da tela de ${nome}` : moderador ? `Moderar ${nome}` : `Volume de ${nome}`}
+            aria-expanded={menu}
+            title={q.tela ? 'Volume da tela' : 'Volume e opções'}
+          >
+            <Icone nome={moderador && !q.tela ? 'config' : 'volume'} tamanho={16} />
           </button>
           {menu && (
-            <div className="menu">
-              <button onClick={() => (aoModerar(p.usuarioId, p.silenciado ? 'liberar' : 'silenciar'), setMenu(false))}>
-                {p.silenciado ? 'Liberar a voz' : 'Silenciar para todos'}
+            <div className="menu menu-volume">
+              <label className="volume-pessoa">
+                <span>
+                  {q.tela ? 'Volume da tela' : 'Volume'} <strong>{silenciadoPorMim ? 'mudo' : `${volume}%`}</strong>
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="5"
+                  value={volume}
+                  onChange={(e) => mudarVolume(chave, Number(e.target.value) / 100)}
+                  onDoubleClick={() => mudarVolume(chave, 1)}
+                  aria-label={`Volume de ${nome}${q.tela ? ' (tela)' : ''}`}
+                />
+              </label>
+              <button onClick={() => alternarSilencioLocal(chave)}>
+                {silenciadoPorMim ? 'Voltar a ouvir' : q.tela ? 'Silenciar a tela para mim' : 'Silenciar só para mim'}
               </button>
-              <button className="perigo" onClick={() => (aoModerar(p.usuarioId, 'desconectar'), setMenu(false))}>
-                Tirar da sala
-              </button>
+              {moderador && !q.tela && (
+                <>
+                  <button onClick={() => (aoModerar(p.usuarioId, p.silenciado ? 'liberar' : 'silenciar'), setMenu(false))}>
+                    {p.silenciado ? 'Liberar a voz' : 'Silenciar para todos'}
+                  </button>
+                  <button className="perigo" onClick={() => (aoModerar(p.usuarioId, 'desconectar'), setMenu(false))}>
+                    Tirar da sala
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
