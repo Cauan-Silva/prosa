@@ -7,8 +7,8 @@ backend/internal/web/dist/*
 /carga
 
 # Dados locais
-arquivos/
-backend/arquivos/
+/arquivos/
+/backend/arquivos/
 .env
 
 # Editores e sistema
