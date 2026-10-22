@@ -186,6 +186,18 @@ export function Controles({ perm, compacto }) {
           </button>
         </>
       )}
+      {!compacto && voz.tela && (
+        <div className="modo-tela" role="radiogroup" aria-label="Prioridade da tela">
+          {[
+            ['fluido', 'Fluido', 'Mais quadros por segundo (vídeo, jogos)'],
+            ['nitido', 'Nítido', 'Mais resolução (texto, código, slides)'],
+          ].map(([v, r, dica]) => (
+            <button key={v} role="radio" aria-checked={voz.modoTela === v} title={dica} onClick={() => voz.mudarModoTela(v)}>
+              {r}
+            </button>
+          ))}
+        </div>
+      )}
       <button className="controle sair" onClick={voz.sair} title="Sair da sala" aria-label="Sair da sala">
         <Icone nome="desligar" />
       </button>

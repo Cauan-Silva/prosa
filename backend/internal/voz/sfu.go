@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/pion/rtcp"
@@ -270,23 +269,12 @@ func (s *Sala) publicarFaixa(p *participante, tipo string, remota *webrtc.TrackR
 			_ = local.WriteRTP(pacote) // erro aqui é de quem recebe (ex.: saiu); segue para os outros
 		}
 	}()
-	if tipo == "audio" {
-		return
+	// Vídeo: um quadro completo logo no começo, para quem já está na sala ver na hora.
+	// Depois, só quando alguém pedir (entrou no meio ou perdeu pacotes): quadros completos
+	// são grandes, e pedir de tempos em tempos deixava a transmissão de tela engasgando.
+	if tipo != "audio" {
+		s.pedirQuadro(f)
 	}
-	// Vídeo: pede um quadro completo de tempos em tempos para quem entrar no meio ver logo.
-	go func() {
-		t := time.NewTicker(3 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			s.mu.Lock()
-			viva := s.faixas[f.chave()] == f
-			s.mu.Unlock()
-			if !viva {
-				return
-			}
-			s.pedirQuadro(f)
-		}
-	}()
 }
 
 // pedirQuadro pede ao navegador de quem manda o vídeo um quadro completo (keyframe).

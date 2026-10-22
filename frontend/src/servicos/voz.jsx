@@ -19,6 +19,13 @@ const inicial = {
   camera: false,
   tela: false,
   semMicrofone: false,
+  modoTela: (() => {
+    try {
+      return localStorage.getItem('prosa.modoTela') || 'fluido'
+    } catch {
+      return 'fluido'
+    }
+  })(),
 }
 
 function enderecoVoz(base, canalId) {
@@ -39,6 +46,7 @@ class Sessao {
     this.fila = Promise.resolve()
     this.niveis = {}
     this.fechada = false
+    this.modoTela = 'fluido'
   }
 
   async entrar(servidorId, canalId, desejado) {
@@ -132,6 +140,48 @@ class Sessao {
     const resposta = await pc.createAnswer()
     await pc.setLocalDescription(resposta)
     this.mandar('VOZ_RESPOSTA', { sdp: pc.localDescription.sdp })
+    await this.ajustarQualidade()
+  }
+
+  // Limites de envio: a tela pode gastar bem mais banda que a câmera. No modo "fluido",
+  // o navegador baixa a resolução antes de baixar os quadros por segundo; no "nítido",
+  // faz o contrário (melhor para texto e código parado).
+  async ajustarQualidade() {
+    const regras = {
+      camera: { maxBitrate: 900_000, maxFramerate: 30, preferencia: 'balanced' },
+      tela:
+        this.modoTela === 'nitido'
+          ? { maxBitrate: 2_500_000, maxFramerate: 15, preferencia: 'maintain-resolution' }
+          : { maxBitrate: 3_500_000, maxFramerate: 30, preferencia: 'maintain-framerate' },
+    }
+    for (const [tipo, r] of Object.entries(regras)) {
+      const envio = this.transceptor(tipo)?.sender
+      if (!envio?.track) continue
+      try {
+        const p = envio.getParameters()
+        if (!p.encodings?.length) p.encodings = [{}]
+        p.encodings[0].maxBitrate = r.maxBitrate
+        p.encodings[0].maxFramerate = r.maxFramerate
+        p.degradationPreference = r.preferencia
+        await envio.setParameters(p)
+      } catch {
+        // navegador sem suporte a algum ajuste: segue com o padrão dele
+      }
+    }
+  }
+
+  async mudarModoTela(modo) {
+    this.modoTela = modo
+    const faixa = this.faixas.tela
+    if (faixa) {
+      faixa.contentHint = modo === 'nitido' ? 'detail' : 'motion'
+      try {
+        await faixa.applyConstraints({ frameRate: { ideal: modo === 'nitido' ? 15 : 30, max: modo === 'nitido' ? 15 : 60 } })
+      } catch {
+        // alguns navegadores não deixam mudar com a tela já compartilhada
+      }
+    }
+    await this.ajustarQualidade()
   }
 
   transceptor(tipo) {
@@ -144,6 +194,7 @@ class Sessao {
     this.faixas[tipo] = faixa
     if (tipo !== 'audio') this.locais[tipo] = faixa ? new MediaStream([faixa]) : null
     await this.transceptor(tipo)?.sender.replaceTrack(faixa)
+    if (faixa) await this.ajustarQualidade()
   }
 
   mandar(t, d) {
@@ -232,8 +283,9 @@ export function VozProvider({ children }) {
         }
         atualizar()
       })
+      s.modoTela = atual.modoTela
       sessao.current = s
-      setEstado({ ...inicial, mudo: atual.mudo, surdo: atual.surdo, servidorId, canalId, estado: 'conectando' })
+      setEstado({ ...inicial, mudo: atual.mudo, surdo: atual.surdo, modoTela: atual.modoTela, servidorId, canalId, estado: 'conectando' })
       try {
         await s.entrar(servidorId, canalId, { mudo: atual.mudo, surdo: atual.surdo })
         if (sessao.current !== s) return
@@ -289,9 +341,17 @@ export function VozProvider({ children }) {
     try {
       if (s.faixas.tela) await s.trocarFaixa('tela', null)
       else {
-        const m = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false })
+        const nitido = s.modoTela === 'nitido'
+        const m = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            frameRate: { ideal: nitido ? 15 : 30, max: nitido ? 15 : 60 },
+            width: { max: 1920 },
+            height: { max: 1080 },
+          },
+          audio: false,
+        })
         const faixa = m.getVideoTracks()[0]
-        faixa.contentHint = 'detail'
+        faixa.contentHint = nitido ? 'detail' : 'motion'
         faixa.onended = async () => {
           if (s.faixas.tela === faixa) {
             await s.trocarFaixa('tela', null)
@@ -310,6 +370,16 @@ export function VozProvider({ children }) {
   }, [])
 
   const moderar = useCallback((usuarioId, acao) => sessao.current?.mandar('VOZ_MODERAR', { usuarioId, acao }), [])
+
+  const mudarModoTela = useCallback(async (modo) => {
+    try {
+      localStorage.setItem('prosa.modoTela', modo)
+    } catch {
+      // sem armazenamento
+    }
+    setEstado((e) => ({ ...e, modoTela: modo }))
+    await sessao.current?.mudarModoTela(modo)
+  }, [])
 
   // quem está falando (atualiza poucas vezes por segundo)
   useEffect(() => {
@@ -336,6 +406,7 @@ export function VozProvider({ children }) {
     alternarCamera,
     alternarTela,
     moderar,
+    mudarModoTela,
   }
 
   return (
