@@ -2,6 +2,7 @@
 // Tudo chega pelo gateway (WebSocket) e pelas chamadas à API, e passa por um reducer só.
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import { api, enderecoGateway } from './api.js'
+import { salaDeVoz, tocar } from './sons.js'
 
 const Contexto = createContext(null)
 
@@ -286,6 +287,7 @@ export function EstadoProvider({ children }) {
           if (e.t === 'MEMBRO_ALTERADO' && e.d?.usuarioId === estadoRef.current.eu?.id) recarregar(e.s)
           despachar(acao)
         }
+        sonsDoEvento(e, estadoRef.current)
         for (const f of ouvintes.current) f(e)
       }
       ws.onclose = (ev) => {
@@ -323,6 +325,25 @@ export function EstadoProvider({ children }) {
 }
 
 export const useEstado = () => useContext(Contexto)
+
+// Sons para o que chega dos outros: mensagens, menções e gente entrando/saindo da sua sala de voz.
+function sonsDoEvento(e, estado) {
+  const eu = estado.eu?.id
+  if (e.t === 'MENSAGEM_CRIADA') {
+    const m = e.d
+    if (!m?.autor || m.autor.id === eu) return
+    if (m.mencoes?.includes(eu) || m.mencionaTodos) return tocar('mencao')
+    const canalAberto = Number(location.pathname.match(/^\/s\/\d+\/(\d+)/)?.[1])
+    if (document.hidden || canalAberto !== e.c) tocar('mensagem')
+  } else if (e.t === 'VOZ_ESTADO' && e.d?.canalId === salaDeVoz.canalId) {
+    const antes = new Set((estado.voz[e.s]?.[e.d.canalId] || []).map((p) => p.usuarioId))
+    const depois = new Set((e.d.participantes || []).map((p) => p.usuarioId))
+    const entrou = [...depois].some((id) => id !== eu && !antes.has(id))
+    const saiu = [...antes].some((id) => id !== eu && !depois.has(id))
+    if (entrou) tocar('entrou')
+    else if (saiu) tocar('saiu')
+  }
+}
 
 /** Nome que aparece para um membro (apelido, nome de exibição ou nome de usuário). */
 export const nomeDe = (m) => m?.apelido || m?.nomeExibicao || m?.nomeUsuario || 'Alguém'

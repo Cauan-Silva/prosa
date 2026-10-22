@@ -5,6 +5,7 @@
 // faixas novas, identificadas pelo id do "stream" (u<id da pessoa>).
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { api, lerToken } from './api.js'
+import { salaDeVoz, tocar } from './sons.js'
 
 const Contexto = createContext(null)
 
@@ -205,6 +206,8 @@ export function VozProvider({ children }) {
   const atualizar = useCallback(() => setVersao((v) => v + 1), [])
 
   const sair = useCallback(() => {
+    if (sessao.current) tocar('vozSair')
+    salaDeVoz.canalId = null
     sessao.current?.sair()
     sessao.current = null
     setEstado((e) => ({ ...inicial, mudo: e.mudo, surdo: e.surdo }))
@@ -222,6 +225,8 @@ export function VozProvider({ children }) {
           const erro = s.erro || 'A conexão com a sala caiu.'
           s.sair()
           sessao.current = null
+          salaDeVoz.canalId = null
+          tocar('erro')
           setEstado((e) => ({ ...inicial, mudo: e.mudo, surdo: e.surdo, estado: 'erro', erro }))
           return
         }
@@ -233,6 +238,8 @@ export function VozProvider({ children }) {
         await s.entrar(servidorId, canalId, { mudo: atual.mudo, surdo: atual.surdo })
         if (sessao.current !== s) return
         setEstado((e) => ({ ...e, estado: 'conectada', semMicrofone: !!s.semMicrofone }))
+        salaDeVoz.canalId = canalId
+        tocar('vozEntrar')
       } catch (err) {
         if (sessao.current !== s) return
         s.sair()
@@ -244,6 +251,9 @@ export function VozProvider({ children }) {
   )
 
   const aplicar = useCallback((mudancas) => {
+    const atual = estadoRef.current
+    if ('mudo' in mudancas && mudancas.mudo !== atual.mudo) tocar(mudancas.mudo ? 'mudo' : 'desmudo')
+    if ('surdo' in mudancas && mudancas.surdo !== atual.surdo) tocar(mudancas.surdo ? 'mudo' : 'desmudo')
     setEstado((e) => {
       const novo = { ...e, ...mudancas }
       const s = sessao.current
@@ -266,6 +276,7 @@ export function VozProvider({ children }) {
         await s.trocarFaixa('camera', m.getVideoTracks()[0])
       }
       s.enviarEstado()
+      tocar(s.faixas.camera ? 'ligar' : 'desligar')
       setEstado((e) => ({ ...e, camera: !!s.faixas.camera, erro: '' }))
     } catch {
       setEstado((e) => ({ ...e, erro: 'Não foi possível abrir a câmera. Confira a permissão do navegador.' }))
@@ -291,6 +302,7 @@ export function VozProvider({ children }) {
         await s.trocarFaixa('tela', faixa)
       }
       s.enviarEstado()
+      tocar(s.faixas.tela ? 'ligar' : 'desligar')
       setEstado((e) => ({ ...e, tela: !!s.faixas.tela, erro: '' }))
     } catch {
       // a pessoa cancelou a escolha da tela

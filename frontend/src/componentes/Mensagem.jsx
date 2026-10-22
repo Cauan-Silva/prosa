@@ -6,6 +6,7 @@ import { corDe, nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api, enderecoAnexo } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
 import { formatarCompleto, formatarHora, quando, tamanho } from '../servicos/formato.js'
+import { tocar } from '../servicos/sons.js'
 
 export const RAPIDOS = ['👍', '❤️', '😂', '😮', '🎉', '🙏', '👀', '🔥']
 
@@ -26,7 +27,10 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
     const ja = r?.usuarios.includes(eu.id)
     try {
       if (ja) await api.desreagir(canal.id, m.id, emoji)
-      else await api.reagir(canal.id, m.id, emoji)
+      else {
+        tocar('reacao')
+        await api.reagir(canal.id, m.id, emoji)
+      }
     } catch (e) {
       alert(e.message)
     }

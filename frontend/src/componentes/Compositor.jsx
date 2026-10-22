@@ -6,6 +6,7 @@ import { api, enviarArquivo } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
 import { prepararTexto } from '../servicos/texto.jsx'
 import { tamanho } from '../servicos/formato.js'
+import { tocar } from '../servicos/sons.js'
 
 let contador = 0
 const novoNonce = () => `${Date.now().toString(36)}${(contador++).toString(36)}${Math.random().toString(36).slice(2, 6)}`
@@ -123,6 +124,7 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
       anexos: [],
     }
     despachar({ tipo: 'pendente', canal: canal.id, msg: pendente })
+    tocar('enviar')
     setTexto('')
     setEscolhidos([])
     setEnvios([])
@@ -139,6 +141,7 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
       despachar({ tipo: 'MENSAGEM_CRIADA', s: visao.servidor.id, c: canal.id, d: r })
     } catch (e) {
       despachar({ tipo: 'falhou', canal: canal.id, nonce, erro: e.message })
+      tocar('erro')
     }
   }
 
