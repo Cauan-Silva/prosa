@@ -82,6 +82,10 @@ func Ler() (Config, error) {
 	if c.Desenvolvimento && len(c.OrigensWS) == 0 {
 		c.OrigensWS = []string{"localhost:5173", "127.0.0.1:5173"}
 	}
+	// Aceita o endpoint do S3 sem "https://" (é assim que o Backblaze mostra na tela).
+	if c.S3Endpoint != "" && !strings.Contains(c.S3Endpoint, "://") {
+		c.S3Endpoint = "https://" + c.S3Endpoint
+	}
 	c.TurnURLs = lista(valor("TURN_URLS", ""))
 	if c.Instancia == "" {
 		b := make([]byte, 3)

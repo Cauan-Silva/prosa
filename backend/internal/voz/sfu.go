@@ -197,8 +197,11 @@ func (s *Sala) sair(p *participante) {
 	vazia := len(s.participantes) == 0
 	s.mu.Unlock()
 
+	// Avisa todo mundo antes de fechar a conexão: fechar uma conexão WebRTC que nunca
+	// conectou (ex.: rede sem UDP) pode demorar, e a pessoa não pode ficar "presa" na sala.
+	s.sfu.avisar(context.Background(), s)
 	if p.pc != nil {
-		p.pc.Close()
+		go p.pc.Close()
 	}
 	for _, o := range outros {
 		mudou := false
@@ -219,7 +222,6 @@ func (s *Sala) sair(p *participante) {
 	if vazia {
 		s.sfu.esvaziou(s)
 	}
-	s.sfu.avisar(context.Background(), s)
 }
 
 // publicarFaixa registra uma faixa nova de alguém e passa a repassá-la aos outros.
