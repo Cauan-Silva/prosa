@@ -25,7 +25,8 @@ import (
 )
 
 // Tipos das faixas que cada pessoa pode mandar, na ordem dos transceptores.
-var tiposFaixa = []string{"audio", "camera", "tela"}
+// "telaAudio" é o som da tela compartilhada (vídeo, jogo, música).
+var tiposFaixa = []string{"audio", "camera", "tela", "telaAudio"}
 
 // Estado é o que os outros veem de quem está na sala.
 type Estado struct {
@@ -116,10 +117,10 @@ func (s *Sala) entrar(ctx context.Context, p *participante) error {
 	p.mids = map[string]string{}
 	p.saidas = map[string]*webrtc.RTPSender{}
 
-	// Três transceptores para receber o que a pessoa manda: microfone, câmera e tela.
+	// Um transceptor para cada coisa que a pessoa pode mandar: microfone, câmera, tela e som da tela.
 	for _, tipo := range tiposFaixa {
 		tipoMidia := webrtc.RTPCodecTypeVideo
-		if tipo == "audio" {
+		if tipo == "audio" || tipo == "telaAudio" {
 			tipoMidia = webrtc.RTPCodecTypeAudio
 		}
 		if _, err := pc.AddTransceiverFromKind(tipoMidia, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
@@ -253,7 +254,7 @@ func (s *Sala) publicarFaixa(p *participante, tipo string, remota *webrtc.TrackR
 	// Repassa os pacotes. Áudio só de quem pode falar e não foi silenciado; vídeo só de
 	// quem pode usar câmera/tela. Nada é decodificado.
 	go func() {
-		ehAudio := tipo == "audio"
+		ehAudio := tipo == "audio" // microfone; o som da tela segue a permissão de vídeo
 		for {
 			pacote, _, err := remota.ReadRTP()
 			if err != nil {
@@ -272,7 +273,7 @@ func (s *Sala) publicarFaixa(p *participante, tipo string, remota *webrtc.TrackR
 	// Vídeo: um quadro completo logo no começo, para quem já está na sala ver na hora.
 	// Depois, só quando alguém pedir (entrou no meio ou perdeu pacotes): quadros completos
 	// são grandes, e pedir de tempos em tempos deixava a transmissão de tela engasgando.
-	if tipo != "audio" {
+	if tipo == "camera" || tipo == "tela" {
 		s.pedirQuadro(f)
 	}
 }
@@ -310,7 +311,7 @@ func (s *Sala) assinarFaixa(o *participante, f *faixa) {
 			}
 		}
 	}()
-	if f.tipo != "audio" {
+	if f.tipo == "camera" || f.tipo == "tela" {
 		s.pedirQuadro(f)
 	}
 }

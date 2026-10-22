@@ -65,6 +65,11 @@ function Palco({ visao, canal, pessoas }) {
       {voz.estado === 'conectando' && <p className="aviso-lista">Conectando à sala…</p>}
       {voz.erro && <p className="erro palco-erro">{voz.erro}</p>}
       {voz.semMicrofone && <p className="dica palco-erro">Sem microfone: você está só ouvindo.</p>}
+      {voz.tela && !voz.telaComSom && (
+        <p className="dica palco-erro">
+          Sua tela está sem som. Para mandar o áudio, pare e compartilhe de novo marcando “Compartilhar áudio” (no Chrome ou Edge, ao escolher uma aba ou a tela inteira).
+        </p>
+      )}
       <div className={`quadros ${focado ? 'com-foco' : ''}`}>
         {focado && (
           <div className="quadro-foco">

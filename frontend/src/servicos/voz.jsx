@@ -19,6 +19,7 @@ const inicial = {
   camera: false,
   tela: false,
   semMicrofone: false,
+  telaComSom: false,
   modoTela: (() => {
     try {
       return localStorage.getItem('prosa.modoTela') || 'fluido'
@@ -39,7 +40,7 @@ function enderecoVoz(base, canalId) {
 class Sessao {
   constructor(aoMudar) {
     this.aoMudar = aoMudar
-    this.faixas = { audio: null, camera: null, tela: null }
+    this.faixas = { audio: null, camera: null, tela: null, telaAudio: null }
     this.locais = { camera: null, tela: null } // prévias do que eu mando
     this.remotos = {} // usuarioId -> { audio, camera, tela } (MediaStream)
     this.mids = {}
@@ -114,7 +115,7 @@ class Sessao {
       const stream = e.streams[0]
       const id = Number(stream?.id?.replace(/^u/, ''))
       if (!id) return
-      const tipo = ['audio', 'camera', 'tela'].includes(e.track.id) ? e.track.id : e.track.kind === 'audio' ? 'audio' : 'camera'
+      const tipo = ['audio', 'camera', 'tela', 'telaAudio'].includes(e.track.id) ? e.track.id : e.track.kind === 'audio' ? 'audio' : 'camera'
       const atual = (this.remotos[id] ||= {})
       atual[tipo] = new MediaStream([e.track])
       if (tipo === 'audio') this.medir(id, atual.audio)
@@ -149,6 +150,7 @@ class Sessao {
   async ajustarQualidade() {
     const regras = {
       camera: { maxBitrate: 900_000, maxFramerate: 30, preferencia: 'balanced' },
+      telaAudio: { maxBitrate: 128_000 }, // som da tela com qualidade de música
       tela:
         this.modoTela === 'nitido'
           ? { maxBitrate: 2_500_000, maxFramerate: 15, preferencia: 'maintain-resolution' }
@@ -161,8 +163,8 @@ class Sessao {
         const p = envio.getParameters()
         if (!p.encodings?.length) p.encodings = [{}]
         p.encodings[0].maxBitrate = r.maxBitrate
-        p.encodings[0].maxFramerate = r.maxFramerate
-        p.degradationPreference = r.preferencia
+        if (r.maxFramerate) p.encodings[0].maxFramerate = r.maxFramerate
+        if (r.preferencia) p.degradationPreference = r.preferencia
         await envio.setParameters(p)
       } catch {
         // navegador sem suporte a algum ajuste: segue com o padrão dele
@@ -192,7 +194,7 @@ class Sessao {
     const antiga = this.faixas[tipo]
     if (antiga && antiga !== faixa) antiga.stop()
     this.faixas[tipo] = faixa
-    if (tipo !== 'audio') this.locais[tipo] = faixa ? new MediaStream([faixa]) : null
+    if (tipo === 'camera' || tipo === 'tela') this.locais[tipo] = faixa ? new MediaStream([faixa]) : null
     await this.transceptor(tipo)?.sender.replaceTrack(faixa)
     if (faixa) await this.ajustarQualidade()
   }
@@ -339,8 +341,10 @@ export function VozProvider({ children }) {
     const s = sessao.current
     if (!s) return
     try {
-      if (s.faixas.tela) await s.trocarFaixa('tela', null)
-      else {
+      if (s.faixas.tela) {
+        await s.trocarFaixa('telaAudio', null)
+        await s.trocarFaixa('tela', null)
+      } else {
         const nitido = s.modoTela === 'nitido'
         const m = await navigator.mediaDevices.getDisplayMedia({
           video: {
@@ -348,22 +352,30 @@ export function VozProvider({ children }) {
             width: { max: 1920 },
             height: { max: 1080 },
           },
-          audio: false,
+          // som da tela: sem os filtros de voz, que estragam música e jogo
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          systemAudio: 'include',
         })
         const faixa = m.getVideoTracks()[0]
+        const som = m.getAudioTracks()[0] || null
         faixa.contentHint = nitido ? 'detail' : 'motion'
+        if (som) som.contentHint = 'music'
         faixa.onended = async () => {
           if (s.faixas.tela === faixa) {
+            await s.trocarFaixa('telaAudio', null)
             await s.trocarFaixa('tela', null)
             s.enviarEstado()
-            setEstado((e) => ({ ...e, tela: false }))
+            setEstado((e) => ({ ...e, tela: false, telaComSom: false }))
+            tocar('desligar')
           }
         }
         await s.trocarFaixa('tela', faixa)
+        await s.trocarFaixa('telaAudio', som)
+        setEstado((e) => ({ ...e, telaComSom: !!som }))
       }
       s.enviarEstado()
       tocar(s.faixas.tela ? 'ligar' : 'desligar')
-      setEstado((e) => ({ ...e, tela: !!s.faixas.tela, erro: '' }))
+      setEstado((e) => ({ ...e, tela: !!s.faixas.tela, telaComSom: !!s.faixas.telaAudio, erro: '' }))
     } catch {
       // a pessoa cancelou a escolha da tela
     }
@@ -414,7 +426,12 @@ export function VozProvider({ children }) {
       {children}
       {/* o áudio dos outros toca mesmo navegando pelos canais de texto */}
       <div hidden>
-        {Object.entries(s?.remotos || {}).map(([id, r]) => r.audio && <Audio key={id} stream={r.audio} mudo={estado.surdo} />)}
+        {Object.entries(s?.remotos || {}).map(([id, r]) => (
+          <span key={id}>
+            {r.audio && <Audio stream={r.audio} mudo={estado.surdo} />}
+            {r.telaAudio && <Audio stream={r.telaAudio} mudo={estado.surdo} />}
+          </span>
+        ))}
       </div>
     </Contexto.Provider>
   )
