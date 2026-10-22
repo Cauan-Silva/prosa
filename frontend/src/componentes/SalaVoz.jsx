@@ -202,8 +202,9 @@ export function Controles({ perm, compacto }) {
       {!compacto && voz.tela && (
         <div className="modo-tela" role="radiogroup" aria-label="Prioridade da tela">
           {[
-            ['fluido', 'Fluido', 'Mais quadros por segundo (vídeo, jogos)'],
-            ['nitido', 'Nítido', 'Mais resolução (texto, código, slides)'],
+            ['nitido', 'Nítido', 'Mais resolução, 10 quadros por segundo (texto, código, slides)'],
+            ['fluido', 'Fluido', '30 quadros por segundo (o equilíbrio)'],
+            ['fps60', '60 fps', '60 quadros por segundo; baixa a resolução se precisar (jogos, vídeos). Gasta mais internet'],
           ].map(([v, r, dica]) => (
             <button key={v} role="radio" aria-checked={voz.modoTela === v} title={dica} onClick={() => voz.mudarModoTela(v)}>
               {r}

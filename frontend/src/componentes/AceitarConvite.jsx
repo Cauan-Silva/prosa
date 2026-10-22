@@ -36,7 +36,7 @@ export default function AceitarConvite({ codigo, aoFechar }) {
       {!convite && !erro && <p>Abrindo o convite…</p>}
       {convite && (
         <div className="convite-previa">
-          <Azulejo nome={convite.servidorNome} tamanho={96} />
+          <Azulejo nome={convite.servidorNome} src={convite.servidorIcone} tamanho={96} />
           <p>
             <strong>{convite.criadorNome}</strong> chamou você para
           </p>

@@ -138,7 +138,7 @@ export default function Aplicativo({ caminho }) {
               aria-label={`${v.servidor.nome}${mencoes ? `, ${mencoes} menções` : naoLido ? ', mensagens novas' : ''}`}
               aria-current={id === servidorId ? 'page' : undefined}
             >
-              <Azulejo nome={v.servidor.nome} tamanho={48} />
+              <Azulejo nome={v.servidor.nome} src={v.servidor.icone} tamanho={48} />
               {mencoes > 0 && <span className="selo">{mencoes > 99 ? '99+' : mencoes}</span>}
             </button>
           )

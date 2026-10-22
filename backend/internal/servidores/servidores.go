@@ -91,7 +91,7 @@ func (s *Servico) Criar(w http.ResponseWriter, r *http.Request) error {
 // Meus lista os servidores da pessoa (resumo para a barra lateral).
 func (s *Servico) Meus(w http.ResponseWriter, r *http.Request) error {
 	linhas, err := s.db.QueryContext(r.Context(), `
-		SELECT s.id, s.nome, s.dono_id, s.criado_em
+		SELECT `+colunasServidor+`
 		FROM servidores s JOIN membros m ON m.servidor_id = s.id
 		WHERE m.usuario_id = $1 ORDER BY m.entrou_em`, api.Quem(r).UsuarioID)
 	if err != nil {
@@ -100,8 +100,8 @@ func (s *Servico) Meus(w http.ResponseWriter, r *http.Request) error {
 	defer linhas.Close()
 	lista := []Servidor{}
 	for linhas.Next() {
-		var v Servidor
-		if err := linhas.Scan(&v.ID, &v.Nome, &v.DonoID, &v.CriadoEm); err != nil {
+		v, err := lerServidor(linhas)
+		if err != nil {
 			return err
 		}
 		lista = append(lista, v)
@@ -134,8 +134,7 @@ func (s *Servico) Visao(ctx context.Context, servidorID, usuarioID int64) (Visao
 	if err != nil {
 		return v, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT id, nome, dono_id, criado_em FROM servidores WHERE id = $1`, servidorID).
-		Scan(&v.Servidor.ID, &v.Servidor.Nome, &v.Servidor.DonoID, &v.Servidor.CriadoEm); err != nil {
+	if v.Servidor, err = lerServidor(s.db.QueryRowContext(ctx, `SELECT `+colunasServidor+` FROM servidores s WHERE s.id = $1`, servidorID)); err != nil {
 		return v, err
 	}
 	if v.Cargos, err = s.cargos(ctx, servidorID); err != nil {
@@ -238,10 +237,11 @@ func (s *Servico) Alterar(w http.ResponseWriter, r *http.Request) error {
 	}
 	var v Servidor
 	if err := s.db.QueryRowContext(r.Context(),
-		`UPDATE servidores SET nome = $2 WHERE id = $1 RETURNING id, nome, dono_id, criado_em`, servidorID, nome).
-		Scan(&v.ID, &v.Nome, &v.DonoID, &v.CriadoEm); err != nil {
+		`UPDATE servidores s SET nome = $2 WHERE id = $1 RETURNING `+colunasServidor, servidorID, nome).
+		Scan(&v.ID, &v.Nome, &v.DonoID, &v.CriadoEm, &v.Icone); err != nil {
 		return err
 	}
+	v.Icone = urlIcone(v.Icone)
 	s.auditar(r.Context(), servidorID, c.Membro.UsuarioID, "servidor_alterado", nome, "")
 	s.publicar(r.Context(), eventos.Novo(eventos.ServidorAlterado, servidorID, 0, v))
 	api.Responder(w, http.StatusOK, v)

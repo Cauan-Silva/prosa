@@ -56,7 +56,9 @@ const motivos = [
   ),
 ]
 
-export function Azulejo({ nome, tamanho = 48 }) {
+export function Azulejo({ nome, tamanho = 48, src }) {
+  // imagem escolhida para o servidor; sem ela, o azulejo desenhado a partir do nome
+  if (src) return <img className="azulejo azulejo-imagem" src={src} alt="" width={tamanho} height={tamanho} draggable="false" />
   const h = semente(nome || '?')
   const [a, b] = tintas[h % tintas.length]
   const motivo = motivos[(h >>> 4) % motivos.length]

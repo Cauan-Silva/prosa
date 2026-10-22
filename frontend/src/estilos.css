@@ -1440,6 +1440,15 @@ button.mencao:hover {
   border-radius: 14px;
   box-shadow: 0 0 0 3px var(--linha);
 }
+.azulejo-imagem {
+  object-fit: cover;
+  background: var(--linha);
+  flex: none;
+}
+.previa-azulejo-acoes {
+  display: grid;
+  gap: 8px;
+}
 .previa-azulejo p {
   color: var(--pedra);
   font-size: 13.5px;

@@ -10,7 +10,7 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 ## O que tem aqui
 
 **Servidores, cargos e permissões**
-- Servidores com **categorias** e canais de **texto** e de **voz**
+- Servidores com **imagem própria** (PNG, JPG, WebP ou GIF animado; sem imagem, um azulejo desenhado a partir do nome), **categorias** e canais de **texto** e de **voz**
 - **Cargos** com cor, ordem (hierarquia) e 22 permissões: ver canal, enviar, anexar, reagir, mencionar @todos, gerenciar mensagens, entrar na voz, falar, câmera e tela, silenciar na voz, expulsar, banir, castigar, auditoria, administrador…
 - **Permissões por canal**: em cada canal dá para negar ou permitir qualquer permissão para um cargo ou uma pessoa (canais privados, canais de avisos só leitura…)
 - **Hierarquia de verdade**: ninguém mexe em cargos ou pessoas acima de si, nem dá uma permissão que não tem
@@ -26,7 +26,7 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - **Modo lento** por canal e limite de mensagens por pessoa contra flood
 
 **Voz**
-- Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas; a tela tem os modos Fluido (30 fps) e Nítido
+- Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas; a tela tem os modos Nítido (mais resolução), Fluido (30 fps) e 60 fps (para jogos e vídeos)
 - Quem está falando acende; dá para silenciar o microfone ou o som, e moderadores silenciam ou tiram alguém da sala
 - A voz continua enquanto você navega pelos canais de texto
 
@@ -196,6 +196,7 @@ Todas as rotas, menos cadastro, login, saúde e ver convite, pedem `Authorizatio
 | GET, PATCH | `/api/eu` | Sua conta / muda nome, bio, pronomes, cor e status |
 | PUT | `/api/eu/preferencias` | Salva tema, cores, voz e notificações na conta |
 | POST, DELETE | `/api/eu/avatar`, `/api/eu/banner` | Envia / tira foto e banner |
+| POST, DELETE | `/api/servidores/{id}/icone` | Envia / tira a imagem do servidor |
 | GET | `/api/usuarios/{u}` | Perfil de quem divide servidor com você |
 | GET | `/api/perfis/{u}/{arquivo}` | Imagem de perfil (pública, nome aleatório) |
 | GET | `/api/eu/mencoes` | Últimas mensagens que mencionaram você |

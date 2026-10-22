@@ -17,6 +17,16 @@ const Contexto = createContext(null)
 const TIPOS = ['audio', 'camera', 'tela', 'telaAudio']
 const tipoDeMidia = (tipo) => (tipo === 'audio' || tipo === 'telaAudio' ? 'audio' : 'video')
 
+// Modos da tela compartilhada: quadros por segundo capturados e enviados, e quanta banda
+// cada cópia pode usar (no modo direto o total é dividido entre quem assiste).
+// "fps60" baixa a resolução antes de perder quadros: bom para jogos e vídeos.
+const MODOS_TELA = {
+  nitido: { captura: 15, maxFramerate: 10, maxBitrate: 1_200_000, total: 3_000_000, minimo: 500_000, preferencia: 'maintain-resolution', dica: 'detail' },
+  fluido: { captura: 30, maxFramerate: 30, maxBitrate: 2_000_000, total: 4_000_000, minimo: 700_000, preferencia: 'maintain-framerate', dica: 'motion' },
+  fps60: { captura: 60, maxFramerate: 60, maxBitrate: 4_500_000, total: 8_000_000, minimo: 1_500_000, preferencia: 'maintain-framerate', dica: 'motion' },
+}
+const modoDaTela = (modo) => MODOS_TELA[modo] || MODOS_TELA.fluido
+
 const inicial = {
   canalId: null,
   servidorId: null,
@@ -356,10 +366,10 @@ class Sessao {
     const regras = {
       camera: { maxBitrate: dividir(600_000, 1_800_000, 250_000), maxFramerate: 24, preferencia: 'balanced' },
       telaAudio: { maxBitrate: 96_000 }, // som da tela com qualidade de música
-      tela:
-        this.modoTela === 'nitido'
-          ? { maxBitrate: dividir(1_200_000, 3_000_000, 500_000), maxFramerate: 10, preferencia: 'maintain-resolution' }
-          : { maxBitrate: dividir(2_000_000, 4_000_000, 700_000), maxFramerate: 30, preferencia: 'maintain-framerate' },
+      tela: (() => {
+        const m = modoDaTela(this.modoTela)
+        return { maxBitrate: dividir(m.maxBitrate, m.total, m.minimo), maxFramerate: m.maxFramerate, preferencia: m.preferencia }
+      })(),
     }
     for (const [tipo, r] of Object.entries(regras)) {
       for (const envio of this.envios(tipo)) {
@@ -382,9 +392,10 @@ class Sessao {
     this.modoTela = modo
     const faixa = this.faixas.tela
     if (faixa) {
-      faixa.contentHint = modo === 'nitido' ? 'detail' : 'motion'
+      const m = modoDaTela(modo)
+      faixa.contentHint = m.dica
       try {
-        await faixa.applyConstraints({ frameRate: { ideal: modo === 'nitido' ? 15 : 30, max: modo === 'nitido' ? 15 : 60 } })
+        await faixa.applyConstraints({ frameRate: { ideal: m.captura, max: m.captura } })
       } catch {
         // alguns navegadores não deixam mudar com a tela já compartilhada
       }
@@ -557,10 +568,10 @@ export function VozProvider({ children }) {
         await s.trocarFaixa('telaAudio', null)
         await s.trocarFaixa('tela', null)
       } else {
-        const nitido = s.modoTela === 'nitido'
+        const modo = modoDaTela(s.modoTela)
         const m = await navigator.mediaDevices.getDisplayMedia({
           video: {
-            frameRate: { ideal: nitido ? 15 : 30, max: nitido ? 15 : 60 },
+            frameRate: { ideal: modo.captura, max: modo.captura },
             width: { max: 1920 },
             height: { max: 1080 },
           },
@@ -570,7 +581,7 @@ export function VozProvider({ children }) {
         })
         const faixa = m.getVideoTracks()[0]
         const som = m.getAudioTracks()[0] || null
-        faixa.contentHint = nitido ? 'detail' : 'motion'
+        faixa.contentHint = modo.dica
         if (som) som.contentHint = 'music'
         faixa.onended = async () => {
           if (s.faixas.tela === faixa) {

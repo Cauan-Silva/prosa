@@ -76,14 +76,17 @@ export function enviarArquivo(canalId, arquivo, aoProgredir) {
 }
 
 /** Envia avatar ou banner (já recortado no navegador). */
-export async function enviarImagemPerfil(campo, blob) {
+async function enviarImagem(endereco, blob, nome) {
   const corpo = new FormData()
-  corpo.append('arquivo', blob, `${campo}.webp`)
-  const r = await fetch(`/api/eu/${campo}`, { method: 'POST', headers: { Authorization: `Bearer ${lerToken()}` }, body: corpo })
+  corpo.append('arquivo', blob, blob.type === 'image/gif' ? `${nome}.gif` : `${nome}.webp`)
+  const r = await fetch(endereco, { method: 'POST', headers: { Authorization: `Bearer ${lerToken()}` }, body: corpo })
   const dados = await r.json().catch(() => ({}))
   if (!r.ok) throw new ErroApi(dados.erro || 'Não foi possível enviar a imagem.', r.status)
   return dados
 }
+
+export const enviarImagemPerfil = (campo, blob) => enviarImagem(`/api/eu/${campo}`, blob, campo)
+export const enviarIconeServidor = (id, blob) => enviarImagem(`/api/servidores/${id}/icone`, blob, 'icone')
 
 /** Endereço de um anexo com o token (o <img> não manda o cabeçalho Authorization). */
 export const enderecoAnexo = (endereco) => `${endereco}?t=${encodeURIComponent(lerToken() || '')}`
@@ -111,6 +114,7 @@ export const api = {
   servidor: (id) => pedir('GET', sv(id)),
   alterarServidor: (id, dados) => pedir('PATCH', sv(id), dados),
   apagarServidor: (id) => pedir('DELETE', sv(id)),
+  apagarIconeServidor: (id) => pedir('DELETE', `${sv(id)}/icone`),
   sair: (id) => pedir('DELETE', `${sv(id)}/eu`),
   buscar: (id, filtros) => pedir('GET', `${sv(id)}/busca${q(filtros)}`),
   auditoria: (id) => pedir('GET', `${sv(id)}/auditoria`),

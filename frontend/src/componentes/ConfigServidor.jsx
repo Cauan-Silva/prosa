@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import Modal from './Modal.jsx'
 import CartaoMembro from './CartaoMembro.jsx'
 import { Avatar, Azulejo } from './Azulejo.jsx'
-import { api } from '../servicos/api.js'
+import { api, enviarIconeServidor } from '../servicos/api.js'
+import { recortar } from '../servicos/imagem.js'
 import { nomeDe, corDe, useEstado } from '../servicos/estado.jsx'
 import { GRUPOS, P, porChave, big, numero, tem } from '../servicos/permissoes.js'
 import { corHex, quando } from '../servicos/formato.js'
@@ -51,7 +52,33 @@ function Geral({ visao, aoFechar }) {
   const { estado } = useEstado()
   const [nome, setNome] = useState(visao.servidor.nome)
   const [msg, setMsg] = useState('')
+  const [enviando, setEnviando] = useState(false)
   const dono = visao.servidor.donoId === estado.eu.id
+  const icone = visao.servidor.icone
+
+  async function trocarIcone(arquivo) {
+    if (!arquivo) return
+    setMsg('')
+    setEnviando(true)
+    try {
+      await enviarIconeServidor(visao.servidor.id, await recortar(arquivo, 256, 256, { manterGif: true }))
+      setMsg('Imagem do servidor trocada.')
+    } catch (err) {
+      setMsg(err.message || 'Não foi possível usar essa imagem.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function tirarIcone() {
+    setMsg('')
+    try {
+      await api.apagarIconeServidor(visao.servidor.id)
+      setMsg('Imagem removida: o servidor voltou a usar o azulejo.')
+    } catch (err) {
+      setMsg(err.message)
+    }
+  }
 
   async function salvar(e) {
     e.preventDefault()
@@ -83,8 +110,30 @@ function Geral({ visao, aoFechar }) {
     <>
       <form className="formulario" onSubmit={salvar}>
         <div className="previa-azulejo">
-          <Azulejo nome={nome.trim() || visao.servidor.nome} tamanho={88} />
-          <p>Mudar o nome muda o desenho do azulejo.</p>
+          <Azulejo nome={nome.trim() || visao.servidor.nome} src={icone} tamanho={88} />
+          <div className="previa-azulejo-acoes">
+            <div className="linha-botoes">
+              <label className="botao">
+                {enviando ? 'Enviando…' : icone ? 'Trocar imagem' : 'Escolher imagem'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  hidden
+                  disabled={enviando}
+                  onChange={(e) => {
+                    trocarIcone(e.target.files[0])
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {icone && (
+                <button type="button" className="botao" onClick={tirarIcone}>
+                  Remover imagem
+                </button>
+              )}
+            </div>
+            <p>{icone ? 'PNG, JPG, WebP ou GIF animado, até 4 MB. Ela é recortada em quadrado.' : 'Sem imagem, o servidor usa um azulejo desenhado a partir do nome.'}</p>
+          </div>
         </div>
         <label>
           Nome do servidor
@@ -400,6 +449,8 @@ const ACOES = {
   cargo_dado: 'deu cargo',
   cargo_tirado: 'tirou cargo',
   servidor_alterado: 'alterou o servidor',
+  icone_alterado: 'trocou a imagem do servidor',
+  icone_removido: 'removeu a imagem do servidor',
   apelido_alterado: 'mudou apelido',
 }
 

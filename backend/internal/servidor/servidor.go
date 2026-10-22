@@ -56,7 +56,7 @@ type Servicos struct {
 func Novo(o Opcoes) (http.Handler, Servicos) {
 	sv := Servicos{
 		Usuarios:   usuarios.NovoServico(o.DB, o.Emissor, o.Armazem, o.Publicador),
-		Servidores: servidores.NovoServico(o.DB, o.Publicador),
+		Servidores: servidores.NovoServico(o.DB, o.Publicador, o.Armazem),
 		Mensagens:  mensagens.NovoServico(o.DB, o.Publicador, o.Armazem, o.MaxAnexoMB),
 	}
 	u, s, m := sv.Usuarios, sv.Servidores, sv.Mensagens
@@ -105,6 +105,9 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	logado("PATCH /api/servidores/{servidor}", s.Alterar)
 	logado("DELETE /api/servidores/{servidor}", s.Apagar)
 	logado("DELETE /api/servidores/{servidor}/eu", s.Sair)
+	logado("POST /api/servidores/{servidor}/icone", s.EnviarIcone)
+	logado("DELETE /api/servidores/{servidor}/icone", s.ApagarIcone)
+	mux.HandleFunc("GET /api/icones/{servidor}/{arquivo}", s.Icone)
 	logado("GET /api/servidores/{servidor}/busca", m.Buscar)
 	logado("GET /api/servidores/{servidor}/auditoria", s.Auditoria)
 

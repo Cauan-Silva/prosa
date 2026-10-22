@@ -12,17 +12,19 @@ import (
 
 	"github.com/Cauan-Silva/prosa/internal/acesso"
 	"github.com/Cauan-Silva/prosa/internal/api"
+	"github.com/Cauan-Silva/prosa/internal/arquivos"
 	"github.com/Cauan-Silva/prosa/internal/eventos"
 )
 
 type Servico struct {
-	db    *sql.DB
-	pub   eventos.Publicador
-	agora func() time.Time
+	db      *sql.DB
+	pub     eventos.Publicador
+	armazem arquivos.Armazem // ícones dos servidores (nil = envio desativado)
+	agora   func() time.Time
 }
 
-func NovoServico(db *sql.DB, pub eventos.Publicador) *Servico {
-	return &Servico{db: db, pub: pub, agora: time.Now}
+func NovoServico(db *sql.DB, pub eventos.Publicador, armazem arquivos.Armazem) *Servico {
+	return &Servico{db: db, pub: pub, armazem: armazem, agora: time.Now}
 }
 
 // ---- modelos ----
@@ -32,6 +34,7 @@ type Servidor struct {
 	Nome     string    `json:"nome"`
 	DonoID   int64     `json:"donoId"`
 	CriadoEm time.Time `json:"criadoEm"`
+	Icone    string    `json:"icone"` // endereço da imagem ("" = azulejo)
 }
 
 type Categoria struct {

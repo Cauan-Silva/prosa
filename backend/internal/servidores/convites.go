@@ -16,16 +16,17 @@ import (
 )
 
 type Convite struct {
-	Codigo       string     `json:"codigo"`
-	ServidorID   int64      `json:"servidorId"`
-	ServidorNome string     `json:"servidorNome"`
-	CriadorID    int64      `json:"criadorId"`
-	CriadorNome  string     `json:"criadorNome"`
-	Usos         int        `json:"usos"`
-	MaxUsos      *int       `json:"maxUsos"`
-	ExpiraEm     *time.Time `json:"expiraEm"`
-	CriadoEm     time.Time  `json:"criadoEm"`
-	TotalMembros int        `json:"totalMembros,omitempty"`
+	Codigo        string     `json:"codigo"`
+	ServidorID    int64      `json:"servidorId"`
+	ServidorNome  string     `json:"servidorNome"`
+	ServidorIcone string     `json:"servidorIcone"`
+	CriadorID     int64      `json:"criadorId"`
+	CriadorNome   string     `json:"criadorNome"`
+	Usos          int        `json:"usos"`
+	MaxUsos       *int       `json:"maxUsos"`
+	ExpiraEm      *time.Time `json:"expiraEm"`
+	CriadoEm      time.Time  `json:"criadoEm"`
+	TotalMembros  int        `json:"totalMembros,omitempty"`
 }
 
 const letrasConvite = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -39,13 +40,14 @@ func novoCodigoConvite() string {
 	return string(b)
 }
 
-const colunasConvite = `c.codigo, c.servidor_id, s.nome, c.criador_id, u.nome_exibicao, c.usos, c.max_usos, c.expira_em, c.criado_em`
+const colunasConvite = `c.codigo, c.servidor_id, s.nome, s.icone, c.criador_id, u.nome_exibicao, c.usos, c.max_usos, c.expira_em, c.criado_em`
 
 func lerConvite(l interface{ Scan(...any) error }) (Convite, error) {
 	var c Convite
 	var max sql.NullInt32
 	var expira sql.NullTime
-	err := l.Scan(&c.Codigo, &c.ServidorID, &c.ServidorNome, &c.CriadorID, &c.CriadorNome, &c.Usos, &max, &expira, &c.CriadoEm)
+	err := l.Scan(&c.Codigo, &c.ServidorID, &c.ServidorNome, &c.ServidorIcone, &c.CriadorID, &c.CriadorNome, &c.Usos, &max, &expira, &c.CriadoEm)
+	c.ServidorIcone = urlIcone(c.ServidorIcone)
 	if max.Valid {
 		v := int(max.Int32)
 		c.MaxUsos = &v

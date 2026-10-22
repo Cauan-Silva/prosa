@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { recortar } from '../servicos/imagem.js'
 import Modal from './Modal.jsx'
 import Icone from './Icone.jsx'
 import CartaoPerfil from './CartaoPerfil.jsx'
@@ -132,19 +133,6 @@ const STATUS = [
   ['ocupado', 'Não perturbe'],
   ['invisivel', 'Invisível'],
 ]
-
-/** Recorta a imagem no meio (como "cobrir") e converte para WebP no tamanho certo. */
-async function recortar(arquivo, largura, altura) {
-  const img = await createImageBitmap(arquivo)
-  const escala = Math.max(largura / img.width, altura / img.height)
-  const w = img.width * escala
-  const h = img.height * escala
-  const canvas = document.createElement('canvas')
-  canvas.width = largura
-  canvas.height = altura
-  canvas.getContext('2d').drawImage(img, (largura - w) / 2, (altura - h) / 2, w, h)
-  return new Promise((ok) => canvas.toBlob(ok, 'image/webp', 0.88))
-}
 
 function Perfil() {
   const { estado, despachar } = useEstado()
