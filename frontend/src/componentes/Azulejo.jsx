@@ -81,14 +81,17 @@ export function iniciais(nome) {
 
 const coresAvatar = ['#1f3fa6', '#14635a', '#9c2f4a', '#5a2d82', '#b5540f', '#2b6f8f', '#7a5a00', '#3d4a6b']
 
-export function Avatar({ nome, id, tamanho = 36, online }) {
+export function Avatar({ nome, id, tamanho = 36, online, src, status }) {
   let h = semente(`pessoa:${id ?? nome}`)
   h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0
   const a = coresAvatar[(h >>> 7) % coresAvatar.length]
+  const ponto = online === undefined ? null : !online || status === 'invisivel' ? 'off' : status || 'online'
   return (
-    <span className="avatar" style={{ width: tamanho, height: tamanho, background: a, fontSize: tamanho * 0.38 }}>
-      {iniciais(nome)}
-      {online !== undefined && <span className={`ponto-online ${online ? 'on' : ''}`} aria-label={online ? 'online' : 'offline'} />}
+    <span className="avatar" style={{ width: tamanho, height: tamanho, background: src ? 'var(--linha)' : a, fontSize: tamanho * 0.38 }}>
+      {src ? <img src={src} alt="" loading="lazy" draggable="false" /> : iniciais(nome)}
+      {ponto && <span className={`ponto-online ${ponto}`} aria-label={ROTULOS[ponto]} title={ROTULOS[ponto]} />}
     </span>
   )
 }
+
+const ROTULOS = { online: 'online', ausente: 'ausente', ocupado: 'não perturbe', off: 'offline' }

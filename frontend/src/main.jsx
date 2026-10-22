@@ -11,3 +11,8 @@ createRoot(document.getElementById('raiz')).render(
     </SessaoProvider>
   </StrictMode>,
 )
+
+// Permite instalar o Prosa como aplicativo (Chrome/Edge: ícone de instalar na barra de endereço).
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('/sw.js').catch(() => {})
+}

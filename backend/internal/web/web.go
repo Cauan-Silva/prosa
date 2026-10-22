@@ -4,6 +4,7 @@ package web
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -15,7 +16,12 @@ import (
 //go:embed all:dist
 var arquivos embed.FS
 
-// Telas devolve o handler que serve o site. Caminhos que não são arquivos (ex.: /sala/ABC123)
+func init() {
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+	_ = mime.AddExtensionType(".webp", "image/webp")
+}
+
+// Telas devolve o handler que serve o site. Caminhos que não são arquivos (ex.: /s/1/2)
 // recebem o index.html, para o roteador do React decidir o que mostrar.
 func Telas() http.Handler {
 	dist, _ := fs.Sub(arquivos, "dist")
@@ -35,6 +41,8 @@ func Telas() http.Handler {
 				if strings.HasPrefix(caminho, "assets/") {
 					// Os arquivos do Vite têm o hash no nome: podem ficar em cache para sempre.
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else if caminho == "sw.js" {
+					w.Header().Set("Cache-Control", "no-cache") // atualização do service worker chega na hora
 				}
 				arquivosEstaticos.ServeHTTP(w, r)
 				return

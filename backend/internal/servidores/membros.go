@@ -15,23 +15,28 @@ import (
 	"github.com/Cauan-Silva/prosa/internal/api"
 	"github.com/Cauan-Silva/prosa/internal/eventos"
 	"github.com/Cauan-Silva/prosa/internal/permissoes"
+	"github.com/Cauan-Silva/prosa/internal/usuarios"
 )
 
 const consultaMembros = `
 	SELECT u.id, u.nome_usuario, u.nome_exibicao, m.apelido, m.castigado_ate, m.entrou_em,
-	       COALESCE(array_agg(mc.cargo_id) FILTER (WHERE mc.cargo_id IS NOT NULL), '{}')
+	       COALESCE(array_agg(mc.cargo_id) FILTER (WHERE mc.cargo_id IS NOT NULL), '{}'),
+	       u.avatar, u.cor_perfil, CASE WHEN u.status = 'invisivel' THEN 'online' ELSE u.status END,
+	       u.status_texto, u.status_emoji
 	FROM membros m
 	JOIN usuarios u ON u.id = m.usuario_id
 	LEFT JOIN membros_cargos mc ON mc.servidor_id = m.servidor_id AND mc.usuario_id = m.usuario_id
 	WHERE m.servidor_id = $1 %s
-	GROUP BY u.id, u.nome_usuario, u.nome_exibicao, m.apelido, m.castigado_ate, m.entrou_em`
+	GROUP BY u.id, m.apelido, m.castigado_ate, m.entrou_em`
 
 func lerMembro(l interface{ Scan(...any) error }, agora time.Time) (Membro, error) {
 	var m Membro
 	var apelido sql.NullString
 	var castigo sql.NullTime
 	var cargos pq.Int64Array
-	err := l.Scan(&m.UsuarioID, &m.NomeUsuario, &m.NomeExibicao, &apelido, &castigo, &m.EntrouEm, &cargos)
+	err := l.Scan(&m.UsuarioID, &m.NomeUsuario, &m.NomeExibicao, &apelido, &castigo, &m.EntrouEm, &cargos,
+		&m.Avatar, &m.CorPerfil, &m.Status, &m.StatusTexto, &m.StatusEmoji)
+	m.Avatar = usuarios.URLImagem(m.Avatar)
 	if apelido.Valid {
 		m.Apelido = &apelido.String
 	}

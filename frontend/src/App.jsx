@@ -5,13 +5,13 @@ import { EstadoProvider } from './servicos/estado.jsx'
 import { VozProvider } from './servicos/voz.jsx'
 import { navegar, useCaminho } from './servicos/rota.jsx'
 import { useSessao } from './servicos/sessao.jsx'
-import { aplicarTema } from './servicos/tema.js'
+import { iniciarAparencia } from './servicos/aparencia.js'
 
 export default function App() {
   const { usuario, carregando } = useSessao()
   const caminho = useCaminho()
 
-  useEffect(() => aplicarTema(), [])
+  useEffect(() => iniciarAparencia(), [])
 
   // Guarda o convite aberto antes do login para aceitar depois de entrar.
   const convite = caminho.match(/^\/convite\/([\w-]+)/)?.[1]

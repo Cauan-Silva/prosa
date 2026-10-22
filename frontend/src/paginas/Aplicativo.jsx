@@ -7,7 +7,8 @@ import NovoServidor from '../componentes/NovoServidor.jsx'
 import ConfigServidor from '../componentes/ConfigServidor.jsx'
 import ConfigCanal from '../componentes/ConfigCanal.jsx'
 import Convidar from '../componentes/Convidar.jsx'
-import Perfil from '../componentes/Perfil.jsx'
+import Configuracoes from '../componentes/Configuracoes.jsx'
+import CartaoMembro from '../componentes/CartaoMembro.jsx'
 import AceitarConvite from '../componentes/AceitarConvite.jsx'
 import Icone from '../componentes/Icone.jsx'
 import { useEstado } from '../servicos/estado.jsx'
@@ -35,6 +36,14 @@ export default function Aplicativo({ caminho }) {
   const [modal, setModal] = useState(null) // { tipo, ... }
   const [mostrarMembros, setMostrarMembros] = useState(() => window.innerWidth > 1100)
   const [painel, setPainel] = useState('conversa') // no celular: canais | conversa | membros
+  const [perfilAberto, setPerfilAberto] = useState(null)
+
+  // Clique em nome ou foto de alguém (em qualquer lugar) abre o cartão de perfil.
+  useEffect(() => {
+    const abrir = (e) => setPerfilAberto(e.detail.usuarioId)
+    window.addEventListener('prosa:perfil', abrir)
+    return () => window.removeEventListener('prosa:perfil', abrir)
+  }, [])
 
   const [, sid, cid] = caminho.match(/^\/s\/(\d+)(?:\/(\d+))?/) || []
   const servidorId = Number(sid) || null
@@ -109,6 +118,10 @@ export default function Aplicativo({ caminho }) {
       )}
 
       <nav className="trilho" aria-label="Servidores">
+        <button className="trilho-logo" onClick={() => navegar('/')} title="Prosa" aria-label="Prosa, início">
+          <img src="/icone-64.png" alt="" width="48" height="48" />
+        </button>
+        <span className="trilho-divisor" aria-hidden="true" />
         {ordem.map((v) => {
           const id = v.servidor.id
           const naoLido = v.canais.some((c) => c.tipo === 'texto' && (c.ultimaMensagemId || 0) > (c.ultimaLida || 0))
@@ -167,6 +180,7 @@ export default function Aplicativo({ caminho }) {
         </>
       ) : (
         <main className="boas-vindas">
+          <img className="boas-vindas-capa" src="/capa-pequena.webp" alt="Prosa" width="280" height="280" />
           <h2>Bem-vindo ao Prosa, {estado.eu.nomeExibicao}</h2>
           <p>Crie um servidor para sua turma ou entre com o link de convite que alguém mandou.</p>
           <button className="botao primario grande" onClick={() => abrir('novo')}>
@@ -182,7 +196,8 @@ export default function Aplicativo({ caminho }) {
       )}
       {modal?.tipo === 'novo-canal' && visao && <ConfigCanal visao={visao} categoriaId={modal.categoriaId} tipoInicial={modal.tipoCanal} aoFechar={fechar} />}
       {modal?.tipo === 'convidar' && visao && <Convidar visao={visao} canalId={modal.canalId || canalId} aoFechar={fechar} />}
-      {modal?.tipo === 'perfil' && <Perfil aoFechar={fechar} />}
+      {modal?.tipo === 'config' && <Configuracoes aba={modal.aba} aoFechar={fechar} />}
+      {perfilAberto && <CartaoMembro visao={visao} usuarioId={perfilAberto} aoFechar={() => setPerfilAberto(null)} />}
       {convite && <AceitarConvite codigo={convite} aoFechar={() => navegar('/', { substituir: true })} />}
     </div>
   )

@@ -3,6 +3,7 @@ package servidor
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"log/slog"
 	"net"
@@ -54,7 +55,7 @@ type Servicos struct {
 
 func Novo(o Opcoes) (http.Handler, Servicos) {
 	sv := Servicos{
-		Usuarios:   usuarios.NovoServico(o.DB, o.Emissor),
+		Usuarios:   usuarios.NovoServico(o.DB, o.Emissor, o.Armazem, o.Publicador),
 		Servidores: servidores.NovoServico(o.DB, o.Publicador),
 		Mensagens:  mensagens.NovoServico(o.DB, o.Publicador, o.Armazem, o.MaxAnexoMB),
 	}
@@ -65,6 +66,7 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	if o.Presenca == nil {
 		o.Presenca = presenca.NovoLocal()
 	}
+	u.AoMudarStatus = func(ctx context.Context, id int64, invisivel bool) { sv.Gateway.MudouVisibilidade(ctx, id, invisivel) }
 	sv.Gateway = &gateway.Gateway{
 		DB: o.DB, Emissor: o.Emissor, Hub: o.Hub, Publicador: o.Publicador, Presenca: o.Presenca,
 		Servidores: s, Usuarios: u, Origens: o.OrigensWS, Instancia: o.Instancia,
@@ -87,6 +89,13 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	// conta
 	logado("GET /api/eu", u.Eu)
 	logado("PATCH /api/eu", u.AlterarPerfil)
+	logado("PUT /api/eu/preferencias", u.SalvarPreferencias)
+	logado("POST /api/eu/avatar", u.EnviarImagem("avatar"))
+	logado("DELETE /api/eu/avatar", u.ApagarImagem("avatar"))
+	logado("POST /api/eu/banner", u.EnviarImagem("banner"))
+	logado("DELETE /api/eu/banner", u.ApagarImagem("banner"))
+	logado("GET /api/usuarios/{usuario}", u.VerPerfil)
+	mux.HandleFunc("GET /api/perfis/{usuario}/{arquivo}", u.Imagem)
 	logado("GET /api/eu/mencoes", m.MinhasMencoes)
 
 	// servidores

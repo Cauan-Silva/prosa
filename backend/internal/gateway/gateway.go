@@ -227,12 +227,53 @@ func (g *Gateway) rodar(ctx context.Context, c *Conexao) {
 }
 
 func (g *Gateway) avisarPresenca(ctx context.Context, c *Conexao, online bool) {
+	if g.invisivel(ctx, c.Usuario.UsuarioID) {
+		return // quem está invisível não aparece entrando nem saindo
+	}
 	dados := map[string]any{"usuarioId": c.Usuario.UsuarioID, "online": online}
 	for id := range c.servidores {
 		e := eventos.Novo(eventos.Presenca, id, 0, dados)
 		if err := g.Publicador.Publicar(ctx, eventos.TopicoServidor(id), e); err != nil {
 			slog.Warn("gateway: presença", "erro", err)
 		}
+	}
+}
+
+func (g *Gateway) invisivel(ctx context.Context, id int64) bool {
+	inv, err := g.Usuarios.Invisiveis(ctx, []int64{id})
+	return err == nil && inv[id]
+}
+
+// MudouVisibilidade é chamado quando alguém entra ou sai do modo invisível: se a pessoa
+// está conectada, os servidores dela a veem sair (ou voltar) na hora.
+func (g *Gateway) MudouVisibilidade(ctx context.Context, id int64, invisivel bool) {
+	if on, err := g.Presenca.Online(ctx, []int64{id}); err != nil || !on[id] {
+		return
+	}
+	ids, err := g.Servidores.ServidoresDe(ctx, id)
+	if err != nil {
+		return
+	}
+	dados := map[string]any{"usuarioId": id, "online": !invisivel}
+	for _, sid := range ids {
+		_ = g.Publicador.Publicar(ctx, eventos.TopicoServidor(sid), eventos.Novo(eventos.Presenca, sid, 0, dados))
+	}
+}
+
+// semInvisiveis tira do mapa de online quem está invisível (menos a própria pessoa).
+func (g *Gateway) semInvisiveis(ctx context.Context, online map[int64]bool, eu int64) {
+	ids := make([]int64, 0, len(online))
+	for id, on := range online {
+		if on && id != eu {
+			ids = append(ids, id)
+		}
+	}
+	inv, err := g.Usuarios.Invisiveis(ctx, ids)
+	if err != nil {
+		return
+	}
+	for id := range inv {
+		delete(online, id)
 	}
 }
 
@@ -296,6 +337,7 @@ func (g *Gateway) montarPronto(ctx context.Context, c *Conexao) (pronto, error) 
 			slog.Warn("gateway: presença", "erro", err)
 			online = map[int64]bool{}
 		}
+		g.semInvisiveis(ctx, online, eu)
 		online[eu] = true
 		for s, membros := range porServidor {
 			on := []int64{}
@@ -403,12 +445,15 @@ func (c *Conexao) processar(ctx context.Context, e eventos.Evento) []saida {
 			c.servidores[e.ServidorID], c.assinatura[e.ServidorID] = ac, assinatura(ac)
 		}
 		// quem já estava no servidor fica sabendo que a pessoa nova está online
-		pres := eventos.Novo(eventos.Presenca, e.ServidorID, 0, map[string]any{"usuarioId": eu, "online": true})
-		if err := g.Publicador.Publicar(ctx, eventos.TopicoServidor(e.ServidorID), pres); err != nil {
-			slog.Warn("gateway: presença", "erro", err)
+		if !g.invisivel(ctx, eu) {
+			pres := eventos.Novo(eventos.Presenca, e.ServidorID, 0, map[string]any{"usuarioId": eu, "online": true})
+			if err := g.Publicador.Publicar(ctx, eventos.TopicoServidor(e.ServidorID), pres); err != nil {
+				slog.Warn("gateway: presença", "erro", err)
+			}
 		}
 		online := []int64{}
 		if mapa, err := g.Presenca.Online(ctx, membrosDaVisao(ctx, g.DB, e.ServidorID)); err == nil {
+			g.semInvisiveis(ctx, mapa, eu)
 			for u := range mapa {
 				online = append(online, u)
 			}

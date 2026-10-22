@@ -4,6 +4,7 @@ package usuarios
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/mail"
@@ -15,7 +16,9 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/Cauan-Silva/prosa/internal/api"
+	"github.com/Cauan-Silva/prosa/internal/arquivos"
 	"github.com/Cauan-Silva/prosa/internal/auth"
+	"github.com/Cauan-Silva/prosa/internal/eventos"
 )
 
 type Usuario struct {
@@ -24,16 +27,22 @@ type Usuario struct {
 	NomeExibicao string    `json:"nomeExibicao"`
 	Email        string    `json:"email,omitempty"`
 	CriadoEm     time.Time `json:"criadoEm"`
+	Perfil
+	Preferencias json.RawMessage `json:"preferencias,omitempty"` // só para a própria pessoa
 }
 
 type Servico struct {
 	db      *sql.DB
 	emissor *auth.Emissor
 	hash    func(string) (string, error)
+	armazem arquivos.Armazem
+	pub     eventos.Publicador
+	// AoMudarStatus avisa o gateway quando a pessoa entra ou sai do modo invisível.
+	AoMudarStatus func(ctx context.Context, usuarioID int64, invisivel bool)
 }
 
-func NovoServico(db *sql.DB, emissor *auth.Emissor) *Servico {
-	return &Servico{db: db, emissor: emissor, hash: auth.HashSenha}
+func NovoServico(db *sql.DB, emissor *auth.Emissor, armazem arquivos.Armazem, pub eventos.Publicador) *Servico {
+	return &Servico{db: db, emissor: emissor, hash: auth.HashSenha, armazem: armazem, pub: pub}
 }
 
 var nomeUsuarioValido = regexp.MustCompile(`^[a-z0-9_.]{3,32}$`)
@@ -106,7 +115,7 @@ func (s *Servico) Cadastrar(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return s.responderComToken(w, http.StatusCreated, u)
+	return s.responderComToken(w, r, http.StatusCreated, u)
 }
 
 func (s *Servico) Entrar(w http.ResponseWriter, r *http.Request) error {
@@ -130,10 +139,13 @@ func (s *Servico) Entrar(w http.ResponseWriter, r *http.Request) error {
 	if ok, err := auth.ConferirSenha(p.Senha, hash); err != nil || !ok {
 		return recusa
 	}
-	return s.responderComToken(w, http.StatusOK, u)
+	return s.responderComToken(w, r, http.StatusOK, u)
 }
 
-func (s *Servico) responderComToken(w http.ResponseWriter, status int, u Usuario) error {
+func (s *Servico) responderComToken(w http.ResponseWriter, r *http.Request, status int, u Usuario) error {
+	if completo, err := s.Buscar(r.Context(), u.ID); err == nil {
+		u = completo
+	}
 	token, err := s.emissor.Emitir(auth.Identidade{UsuarioID: u.ID, Nome: u.NomeExibicao})
 	if err != nil {
 		return err
@@ -145,15 +157,22 @@ func (s *Servico) responderComToken(w http.ResponseWriter, status int, u Usuario
 // Buscar devolve a pessoa logada (com e-mail).
 func (s *Servico) Buscar(ctx context.Context, id int64) (Usuario, error) {
 	var u Usuario
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, nome_usuario, nome_exibicao, email, criado_em FROM usuarios WHERE id = $1`, id).
-		Scan(&u.ID, &u.NomeUsuario, &u.NomeExibicao, &u.Email, &u.CriadoEm)
+	var avatar, banner string
+	var prefs []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, nome_usuario, nome_exibicao, email, criado_em, avatar, banner, cor_perfil, bio, pronomes,
+		       status, status_texto, status_emoji, preferencias
+		FROM usuarios WHERE id = $1`, id).
+		Scan(&u.ID, &u.NomeUsuario, &u.NomeExibicao, &u.Email, &u.CriadoEm, &avatar, &banner, &u.CorPerfil, &u.Bio,
+			&u.Pronomes, &u.Status, &u.StatusTexto, &u.StatusEmoji, &prefs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return u, api.NovoErro(http.StatusUnauthorized, "Conta não encontrada. Entre de novo.")
 	}
+	u.Avatar, u.Banner, u.Preferencias = URLImagem(avatar), URLImagem(banner), prefs
 	return u, err
 }
 
+// Eu devolve a própria conta (com e-mail e preferências).
 func (s *Servico) Eu(w http.ResponseWriter, r *http.Request) error {
 	u, err := s.Buscar(r.Context(), api.Quem(r).UsuarioID)
 	if err != nil {
@@ -161,23 +180,4 @@ func (s *Servico) Eu(w http.ResponseWriter, r *http.Request) error {
 	}
 	api.Responder(w, http.StatusOK, u)
 	return nil
-}
-
-// AlterarPerfil muda o nome de exibição.
-func (s *Servico) AlterarPerfil(w http.ResponseWriter, r *http.Request) error {
-	var p struct {
-		NomeExibicao string `json:"nomeExibicao"`
-	}
-	if err := api.Ler(r, &p); err != nil {
-		return err
-	}
-	nome := strings.Join(strings.Fields(p.NomeExibicao), " ")
-	if n := utf8.RuneCountInString(nome); n < 1 || n > 40 {
-		return api.NovoErro(http.StatusBadRequest, "O nome de exibição precisa ter de 1 a 40 caracteres.")
-	}
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE usuarios SET nome_exibicao = $2 WHERE id = $1`,
-		api.Quem(r).UsuarioID, nome); err != nil {
-		return err
-	}
-	return s.Eu(w, r)
 }

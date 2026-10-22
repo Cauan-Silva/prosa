@@ -8,6 +8,9 @@ import { P, tem } from '../servicos/permissoes.js'
 import { formatarCompleto, formatarHora, quando, tamanho } from '../servicos/formato.js'
 import { tocar } from '../servicos/sons.js'
 
+/** Abre o cartão de perfil de alguém (o Aplicativo escuta este evento). */
+export const abrirPerfil = (usuarioId) => window.dispatchEvent(new CustomEvent('prosa:perfil', { detail: { usuarioId } }))
+
 export const RAPIDOS = ['👍', '❤️', '😂', '😮', '🎉', '🙏', '👀', '🔥']
 
 function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoResponder }) {
@@ -77,12 +80,16 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
             {formatarHora(m.criadaEm)}
           </time>
         ) : (
-          <Avatar nome={nome} id={m.autor?.id ?? 0} tamanho={40} />
+          <button className="autor-foto" onClick={() => m.autor && abrirPerfil(m.autor.id)} aria-label={`Perfil de ${nome}`}>
+            <Avatar nome={nome} id={m.autor?.id ?? 0} src={membro?.avatar} tamanho={40} />
+          </button>
         )}
         <div className="mensagem-corpo">
           {!junto && (
             <header>
-              <strong style={cor ? { color: cor } : undefined}>{nome}</strong>
+              <button className="autor-nome" style={cor ? { color: cor } : undefined} onClick={() => m.autor && abrirPerfil(m.autor.id)}>
+                {nome}
+              </button>
               <time dateTime={m.criadaEm} title={formatarCompleto(m.criadaEm)}>
                 {quando(m.criadaEm)}
               </time>

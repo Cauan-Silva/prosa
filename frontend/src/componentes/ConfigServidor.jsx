@@ -302,7 +302,7 @@ function ListaMembros({ visao }) {
         {lista.map((m) => (
           <li key={m.usuarioId}>
             <button onClick={() => setAberto(m.usuarioId)}>
-              <Avatar nome={m.nomeExibicao} id={m.usuarioId} tamanho={32} />
+              <Avatar nome={m.nomeExibicao} id={m.usuarioId} src={m.avatar} tamanho={32} />
               <span>
                 <strong style={{ color: corDe(m, visao.cargos) || undefined }}>{nomeDe(m)}</strong>
                 <small>@{m.nomeUsuario}</small>

@@ -5,7 +5,6 @@ import { useEstado } from '../servicos/estado.jsx'
 import { P, tem } from '../servicos/permissoes.js'
 import { api } from '../servicos/api.js'
 import { navegar } from '../servicos/rota.jsx'
-import { escolherTema, temaAtual } from '../servicos/tema.js'
 import { useVoz } from '../servicos/voz.jsx'
 import { Controles } from './SalaVoz.jsx'
 
@@ -150,7 +149,7 @@ function ItemCanal({ canal, ativo, aoEscolher, aoAbrir, voz, membros }) {
             const m = membros?.find((x) => x.usuarioId === v.usuarioId)
             return (
               <li key={v.usuarioId} className={v.falando ? 'falando' : ''}>
-                <Avatar nome={m?.nomeExibicao || v.nome} id={v.usuarioId} tamanho={22} />
+                <Avatar nome={m?.nomeExibicao || v.nome} id={v.usuarioId} src={m?.avatar} tamanho={22} />
                 <span>{m?.apelido || m?.nomeExibicao || v.nome}</span>
                 {v.mudo && <Icone nome="microfone-off" tamanho={14} />}
               </li>
@@ -162,31 +161,62 @@ function ItemCanal({ canal, ativo, aoEscolher, aoAbrir, voz, membros }) {
   )
 }
 
+const STATUS = [
+  ['online', 'Online', ''],
+  ['ausente', 'Ausente', ''],
+  ['ocupado', 'Não perturbe', 'Sem sons de mensagens nem notificações'],
+  ['invisivel', 'Invisível', 'Você aparece offline, mas usa tudo normalmente'],
+]
+
 function Rodape({ aoAbrir }) {
-  const { estado } = useEstado()
-  const [tema, setTema] = useState(temaAtual)
-  const proximo = { sistema: 'escuro', escuro: 'claro', claro: 'sistema' }
-  const rotulos = { sistema: 'Tema do sistema', escuro: 'Tema escuro', claro: 'Tema claro' }
+  const { estado, despachar } = useEstado()
+  const [menu, setMenu] = useState(false)
+  const ref = useRef(null)
+  const eu = estado.eu
+  useEffect(() => {
+    if (!menu) return
+    const fora = (e) => !ref.current?.contains(e.target) && setMenu(false)
+    document.addEventListener('pointerdown', fora)
+    return () => document.removeEventListener('pointerdown', fora)
+  }, [menu])
+
+  async function mudarStatus(status) {
+    setMenu(false)
+    try {
+      despachar({ tipo: 'eu', usuario: await api.alterarPerfil({ status }) })
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
   return (
-    <div className="rodape-usuario">
-      <button className="rodape-eu" onClick={() => aoAbrir('perfil')} title="Seu perfil">
-        <Avatar nome={estado.eu.nomeExibicao} id={estado.eu.id} tamanho={34} online />
+    <div className="rodape-usuario" ref={ref}>
+      {menu && (
+        <div className="menu menu-status" role="menu">
+          {STATUS.map(([v, r, dica]) => (
+            <button key={v} role="menuitemradio" aria-checked={eu.status === v} onClick={() => mudarStatus(v)}>
+              <span className={`ponto-online inline ${v === 'invisivel' ? 'off' : v}`} />
+              <span>
+                {r}
+                {dica && <small>{dica}</small>}
+              </span>
+            </button>
+          ))}
+          <hr />
+          <button role="menuitem" onClick={() => (setMenu(false), aoAbrir('config', { aba: 'perfil' }))}>
+            <Icone nome="editar" tamanho={16} /> Editar perfil
+          </button>
+        </div>
+      )}
+      <button className="rodape-eu" onClick={() => setMenu((m) => !m)} aria-expanded={menu} title="Seu status e perfil">
+        <Avatar nome={eu.nomeExibicao} id={eu.id} src={eu.avatar} status={eu.status} tamanho={34} online />
         <span>
-          <strong>{estado.eu.nomeExibicao}</strong>
-          <small>@{estado.eu.nomeUsuario}</small>
+          <strong>{eu.nomeExibicao}</strong>
+          <small>{eu.statusTexto ? `${eu.statusEmoji || ''} ${eu.statusTexto}`.trim() : `@${eu.nomeUsuario}`}</small>
         </span>
       </button>
-      <button
-        className="icone-botao"
-        onClick={() => {
-          const t = proximo[tema]
-          escolherTema(t)
-          setTema(t)
-        }}
-        title={`${rotulos[tema]} (clique para trocar)`}
-        aria-label={rotulos[tema]}
-      >
-        <Icone nome={tema === 'claro' ? 'sol' : tema === 'escuro' ? 'lua' : 'bussola'} tamanho={18} />
+      <button className="icone-botao" onClick={() => aoAbrir('config')} title="Configurações" aria-label="Configurações">
+        <Icone nome="config" tamanho={18} />
       </button>
     </div>
   )

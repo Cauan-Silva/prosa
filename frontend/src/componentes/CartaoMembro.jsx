@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Modal from './Modal.jsx'
-import { Avatar } from './Azulejo.jsx'
+import CartaoPerfil from './CartaoPerfil.jsx'
 import { nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
-import { corHex, formatarDia } from '../servicos/formato.js'
+import { corHex } from '../servicos/formato.js'
 
 const CASTIGOS = [
   [5, '5 minutos'],
@@ -15,11 +15,28 @@ const CASTIGOS = [
 
 export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
   const { estado } = useEstado()
-  const sid = visao.servidor.id
-  const m = estado.membros[sid]?.find((x) => x.usuarioId === usuarioId)
+  const sid = visao?.servidor.id
+  const m = visao && estado.membros[sid]?.find((x) => x.usuarioId === usuarioId)
   const [erro, setErro] = useState('')
   const [ocupado, setOcupado] = useState(false)
-  if (!m) return null
+  const [completo, setCompleto] = useState(null)
+
+  // bio, banner e pronomes vêm do perfil completo
+  useEffect(() => {
+    api.perfil(usuarioId).then(setCompleto).catch(() => {})
+  }, [usuarioId, m?.avatar, m?.statusTexto])
+
+  const souEu = usuarioId === estado.eu.id
+  const perfil = { ...(completo || {}), ...(m || {}), ...(souEu ? estado.eu : {}), usuarioId }
+  const onlineAgora = souEu || !!(sid && estado.online[sid]?.[usuarioId])
+  if (!m) {
+    if (!completo && !souEu) return null
+    return (
+      <Modal titulo={perfil.nomeExibicao} aoFechar={aoFechar} largura="perfil" semTopo>
+        <CartaoPerfil perfil={perfil} />
+      </Modal>
+    )
+  }
 
   const eu = estado.eu.id
   const souDono = visao.servidor.donoId === eu
@@ -47,19 +64,10 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
   const disponiveis = visao.cargos.filter((c) => !c.padrao && !m.cargos.includes(c.id) && (souDono || c.posicao < minhaPos))
 
   return (
-    <Modal titulo={nomeDe(m)} aoFechar={aoFechar} largura="pequena">
-      <div className="cartao-membro">
-        <Avatar nome={m.nomeExibicao} id={m.usuarioId} tamanho={72} online={!!estado.online[sid]?.[m.usuarioId] || m.usuarioId === eu} />
-        <div>
-          <strong>{m.nomeExibicao}</strong>
-          <p>@{m.nomeUsuario}</p>
-          {m.apelido && <p>Apelido aqui: {m.apelido}</p>}
-          <p>No servidor desde {formatarDia(m.entrouEm).toLowerCase()}</p>
-          {castigo && <p className="erro">De castigo até {new Date(m.castigadoAte).toLocaleString('pt-BR')}</p>}
-        </div>
-      </div>
-
-      <h3>Cargos</h3>
+    <Modal titulo={nomeDe(m)} aoFechar={aoFechar} largura="perfil" semTopo>
+      <CartaoPerfil perfil={perfil} online={onlineAgora} apelido={m.apelido} desde={m.entrouEm}>
+      {castigo && <p className="erro">De castigo até {new Date(m.castigadoAte).toLocaleString('pt-BR')}</p>}
+      <h4 className="perfil-secao">Cargos</h4>
       <ul className="chips">
         {cargosDele.length === 0 && <li className="vazio">Nenhum cargo além de @todos.</li>}
         {cargosDele.map((c) => (
@@ -104,7 +112,7 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
 
       {acima && (tem(base, P.Castigar) || tem(base, P.Expulsar) || tem(base, P.Banir)) && (
         <>
-          <h3>Moderação</h3>
+          <h4 className="perfil-secao">Moderação</h4>
           <div className="moderacao">
             {tem(base, P.Castigar) &&
               (castigo ? (
@@ -159,6 +167,7 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
         </>
       )}
       {erro && <p className="erro">{erro}</p>}
+      </CartaoPerfil>
     </Modal>
   )
 }

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import { api, enderecoGateway } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
+import { carregarDaConta, preferencias } from './preferencias.js'
 
 const Contexto = createContext(null)
 
@@ -66,7 +67,24 @@ function reducer(estado, a) {
     }
 
     case 'eu':
-      return { ...estado, eu: a.usuario }
+      return { ...estado, eu: { ...estado.eu, ...a.usuario } }
+
+    case 'USUARIO_ALTERADO': {
+      const d = a.d
+      const campos = {
+        nomeExibicao: d.nomeExibicao, avatar: d.avatar, corPerfil: d.corPerfil,
+        status: d.status, statusTexto: d.statusTexto, statusEmoji: d.statusEmoji,
+      }
+      const membros = {}
+      for (const [sid, lista] of Object.entries(estado.membros)) {
+        membros[sid] = lista.some((m) => m.usuarioId === d.usuarioId)
+          ? lista.map((m) => (m.usuarioId === d.usuarioId ? { ...m, ...campos } : m))
+          : lista
+      }
+      // a própria pessoa (em outra aba) recebe o status real, inclusive "invisível"
+      const eu = d.usuarioId === estado.eu?.id && !a.s ? { ...estado.eu, ...d, status: estado.eu.status } : estado.eu
+      return { ...estado, membros, eu }
+    }
 
     case 'SERVIDOR_CRIADO': {
       const online = Object.fromEntries((a.d.online || []).map((u) => [u, true]))
@@ -276,6 +294,7 @@ export function EstadoProvider({ children }) {
         const acao = { tipo: e.t, s: e.s, c: e.c, u: e.u, d: e.d }
         if (e.t === 'PRONTO') {
           despachar(acao)
+          carregarDaConta(e.d.usuario?.preferencias)
           // Depois de reconectar, busca o que chegou nos canais abertos enquanto estava fora.
           for (const [canal, dados] of Object.entries(estadoRef.current.mensagens)) {
             const ultima = dados.lista.filter((x) => !x.pendente).at(-1)
@@ -331,8 +350,11 @@ function sonsDoEvento(e, estado) {
   const eu = estado.eu?.id
   if (e.t === 'MENSAGEM_CRIADA') {
     const m = e.d
-    if (!m?.autor || m.autor.id === eu) return
-    if (m.mencoes?.includes(eu) || m.mencionaTodos) return tocar('mencao')
+    // status "não perturbe": sem sons nem notificações de mensagem
+    if (!m?.autor || m.autor.id === eu || estado.eu?.status === 'ocupado') return
+    const mencao = m.mencoes?.includes(eu) || m.mencionaTodos
+    notificar(e, m, mencao, estado)
+    if (mencao) return tocar('mencao')
     const canalAberto = Number(location.pathname.match(/^\/s\/\d+\/(\d+)/)?.[1])
     if (document.hidden || canalAberto !== e.c) tocar('mensagem')
   } else if (e.t === 'VOZ_ESTADO' && e.d?.canalId === salaDeVoz.canalId) {
@@ -356,4 +378,29 @@ export function corDe(membro, cargos) {
     if (c.cor && membro.cargos?.includes(c.id) && (!melhor || c.posicao > melhor.posicao)) melhor = c
   }
   return melhor ? `#${melhor.cor.toString(16).padStart(6, '0')}` : null
+}
+
+// Notificação do sistema (Windows, macOS, Android) quando a aba está em segundo plano.
+function notificar(e, m, mencao, estado) {
+  const cfg = preferencias().notificacoes
+  if (!cfg.area || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return
+  if (!mencao && !cfg.todas) return
+  const v = estado.servidores[e.s]
+  const canal = v?.canais.find((c) => c.id === e.c)
+  const membro = estado.membros[e.s]?.find((x) => x.usuarioId === m.autor.id)
+  try {
+    const n = new Notification(`${membro?.apelido || m.autor.nomeExibicao}${canal ? ` em #${canal.nome}` : ''}`, {
+      body: (m.conteudo || 'Enviou um anexo').replace(/<@&?\d+>/g, '@…').slice(0, 180),
+      icon: membro?.avatar || '/icone-192.png',
+      tag: `canal-${e.c}`,
+    })
+    n.onclick = () => {
+      window.focus()
+      history.pushState(null, '', `/s/${e.s}/${e.c}`)
+      window.dispatchEvent(new Event('rota'))
+      n.close()
+    }
+  } catch {
+    // alguns navegadores só deixam notificar pelo service worker
+  }
 }

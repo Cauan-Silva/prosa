@@ -40,6 +40,7 @@ const (
 	Digitando         = "DIGITANDO"
 	Presenca          = "PRESENCA"
 	VozEstado         = "VOZ_ESTADO"
+	UsuarioAlterado   = "USUARIO_ALTERADO" // perfil ou status de alguém mudou
 )
 
 // MudaPermissoes diz se o evento pode mudar o que alguém vê no servidor

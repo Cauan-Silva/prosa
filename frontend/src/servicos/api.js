@@ -75,6 +75,16 @@ export function enviarArquivo(canalId, arquivo, aoProgredir) {
   })
 }
 
+/** Envia avatar ou banner (já recortado no navegador). */
+export async function enviarImagemPerfil(campo, blob) {
+  const corpo = new FormData()
+  corpo.append('arquivo', blob, `${campo}.webp`)
+  const r = await fetch(`/api/eu/${campo}`, { method: 'POST', headers: { Authorization: `Bearer ${lerToken()}` }, body: corpo })
+  const dados = await r.json().catch(() => ({}))
+  if (!r.ok) throw new ErroApi(dados.erro || 'Não foi possível enviar a imagem.', r.status)
+  return dados
+}
+
 /** Endereço de um anexo com o token (o <img> não manda o cabeçalho Authorization). */
 export const enderecoAnexo = (endereco) => `${endereco}?t=${encodeURIComponent(lerToken() || '')}`
 
@@ -92,6 +102,9 @@ export const api = {
   entrar: (login, senha) => pedir('POST', '/api/entrar', { login, senha }),
   eu: () => pedir('GET', '/api/eu'),
   alterarPerfil: (dados) => pedir('PATCH', '/api/eu', dados),
+  salvarPreferencias: (prefs) => pedir('PUT', '/api/eu/preferencias', prefs),
+  apagarImagemPerfil: (campo) => pedir('DELETE', `/api/eu/${campo}`),
+  perfil: (id) => pedir('GET', `/api/usuarios/${id}`),
   mencoes: () => pedir('GET', '/api/eu/mencoes'),
 
   criarServidor: (nome) => pedir('POST', '/api/servidores', { nome }),

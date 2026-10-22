@@ -26,11 +26,19 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - **Modo lento** por canal e limite de mensagens por pessoa contra flood
 
 **Voz**
-- Salas de voz com **microfone, câmera e compartilhamento de tela**, até 25 pessoas
+- Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas; a tela tem os modos Fluido (30 fps) e Nítido
 - Quem está falando acende; dá para silenciar o microfone ou o som, e moderadores silenciam ou tiram alguém da sala
 - A voz continua enquanto você navega pelos canais de texto
 
-**Visual próprio**: cada servidor ganha um **azulejo** desenhado a partir do nome. Tema claro e escuro, funciona no celular.
+**Perfil e configurações**
+- **Perfil** com foto, banner, cor, pronomes, “sobre mim” e status (online, ausente, não perturbe, invisível) com texto e emoji; quem divide servidor com você vê o cartão completo ao clicar no seu nome
+- **Aparência**: 9 temas (Azulejo, Meia-noite, Neon, Grafite, Floresta, Café, Rosa, Alto contraste…), qualquer cor de destaque, 5 fontes, tamanho da interface, mensagens compactas e cantos retos. Fica salvo na conta e vale em qualquer navegador
+- **Voz e vídeo**: escolha de microfone, saída e câmera, teste de microfone com medidor, supressão de ruído e de eco, **filtro de ruído (portão)** com sensibilidade ajustável e **pressionar para falar** com tecla configurável
+- **Notificações do sistema** e **sons** da interface, com volume; o status “não perturbe” silencia tudo
+- **Acessibilidade**: escala, alto contraste, fonte de leitura fácil, sem animações, links sublinhados
+- **Instalável** como aplicativo (PWA) no computador e no celular
+
+**Visual próprio**: logo do Prosa e um **azulejo** desenhado a partir do nome de cada servidor. Funciona no celular.
 
 ## Arquitetura
 
@@ -82,7 +90,7 @@ Duas otimizações vieram do teste: cada evento é convertido em JSON uma vez s�
 - **Segurança:** senhas com PBKDF2-SHA256 e JWT HS256 com a biblioteca padrão, limite de tentativas de login por IP, tipo dos anexos detectado pelo conteúdo, cabeçalhos de segurança (CSP, nosniff, frame-ancestors)
 - **Telas:** React 19 e Vite, sem outras dependências (estado, roteador, WebRTC e formatação de texto escritos à mão)
 - **Infra:** Docker (imagem distroless), docker-compose com 2 instâncias + Caddy + Redis + PostgreSQL, Render, Neon e GitHub Actions
-- **Testes:** 33 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
+- **Testes:** 34 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
 
 ## Como rodar no seu computador
 
@@ -178,7 +186,11 @@ Todas as rotas, menos cadastro, login, saúde e ver convite, pedem `Authorizatio
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/api/cadastro`, `/api/entrar` | Cria a conta / entra (devolve o token) |
-| GET, PATCH | `/api/eu` | Sua conta / muda seu nome |
+| GET, PATCH | `/api/eu` | Sua conta / muda nome, bio, pronomes, cor e status |
+| PUT | `/api/eu/preferencias` | Salva tema, cores, voz e notificações na conta |
+| POST, DELETE | `/api/eu/avatar`, `/api/eu/banner` | Envia / tira foto e banner |
+| GET | `/api/usuarios/{u}` | Perfil de quem divide servidor com você |
+| GET | `/api/perfis/{u}/{arquivo}` | Imagem de perfil (pública, nome aleatório) |
 | GET | `/api/eu/mencoes` | Últimas mensagens que mencionaram você |
 | GET, POST | `/api/servidores` | Seus servidores / cria um |
 | GET, PATCH, DELETE | `/api/servidores/{s}` | Visão do servidor (canais que você vê, cargos, suas permissões) / altera / apaga |
@@ -211,7 +223,7 @@ Todas as rotas, menos cadastro, login, saúde e ver convite, pedem `Authorizatio
 | GET | `/api/saude` | Verificação de saúde |
 
 **Gateway** (JSON `{"t": tipo, "s": servidor, "c": canal, "d": dados}`):
-- **Do servidor:** `PRONTO` (tudo, ao conectar), `SERVIDOR_CRIADO`/`ALTERADO`/`APAGADO`, `CANAL_*`, `CATEGORIA_*`, `CARGO_*`, `MEMBRO_ENTROU`/`ALTERADO`/`SAIU`, `MENSAGEM_CRIADA`/`EDITADA`/`APAGADA`, `REACAO_ADICIONADA`/`REMOVIDA`, `DIGITANDO`, `PRESENCA`, `VOZ_ESTADO`, `PERMISSOES_ALTERADAS`.
+- **Do servidor:** `PRONTO` (tudo, ao conectar), `USUARIO_ALTERADO`, `SERVIDOR_CRIADO`/`ALTERADO`/`APAGADO`, `CANAL_*`, `CATEGORIA_*`, `CARGO_*`, `MEMBRO_ENTROU`/`ALTERADO`/`SAIU`, `MENSAGEM_CRIADA`/`EDITADA`/`APAGADA`, `REACAO_ADICIONADA`/`REMOVIDA`, `DIGITANDO`, `PRESENCA`, `VOZ_ESTADO`, `PERMISSOES_ALTERADAS`.
 - **Do navegador:** `DIGITANDO` e `PING`.
 
 **Voz:** o servidor manda `VOZ_PRONTO`, `VOZ_OFERTA` (com o mapa de quais transceptores são microfone, câmera e tela), `VOZ_ICE`, `VOZ_REDIRECIONAR` e `VOZ_ERRO`; o navegador manda `VOZ_RESPOSTA`, `VOZ_ICE`, `VOZ_ESTADO` e `VOZ_MODERAR`.

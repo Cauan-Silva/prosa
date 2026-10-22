@@ -3,6 +3,7 @@ import Icone from './Icone.jsx'
 import { Avatar } from './Azulejo.jsx'
 import { nomeDe, useEstado } from '../servicos/estado.jsx'
 import { useVoz } from '../servicos/voz.jsx'
+import { usePreferencias } from '../servicos/preferencias.js'
 import { P, tem } from '../servicos/permissoes.js'
 
 export default function SalaVoz({ visao, canal }) {
@@ -40,6 +41,7 @@ export default function SalaVoz({ visao, canal }) {
 
 function Palco({ visao, canal, pessoas }) {
   const { estado } = useEstado()
+  const prefs = usePreferencias()
   const voz = useVoz()
   const [foco, setFoco] = useState(null) // "id:tipo"
   const eu = estado.eu.id
@@ -65,6 +67,11 @@ function Palco({ visao, canal, pessoas }) {
       {voz.estado === 'conectando' && <p className="aviso-lista">Conectando à sala…</p>}
       {voz.erro && <p className="erro palco-erro">{voz.erro}</p>}
       {voz.semMicrofone && <p className="dica palco-erro">Sem microfone: você está só ouvindo.</p>}
+      {prefs.voz.modo === 'ptt' && !voz.mudo && (
+        <p className={`dica palco-erro ptt ${voz.pttAtivo ? 'ligado' : ''}`}>
+          {voz.pttAtivo ? 'Falando…' : `Segure ${nomeTecla(prefs.voz.teclaPtt)} para falar`}
+        </p>
+      )}
       {voz.tela && !voz.telaComSom && (
         <p className="dica palco-erro">
           Sua tela está sem som. Para mandar o áudio, pare e compartilhe de novo marcando “Compartilhar áudio” (no Chrome ou Edge, ao escolher uma aba ou a tela inteira).
@@ -73,7 +80,7 @@ function Palco({ visao, canal, pessoas }) {
       <div className={`quadros ${focado ? 'com-foco' : ''}`}>
         {focado && (
           <div className="quadro-foco">
-            <Quadro q={focado} falando={falandoDe(voz, focado.p, eu)} nome={nomeDe(membros?.find((m) => m.usuarioId === focado.p.usuarioId)) || focado.p.nome} eu={eu} aoClicar={() => setFoco(null)} />
+            <Quadro q={focado} falando={falandoDe(voz, focado.p, eu)} nome={nomeDe(membros?.find((m) => m.usuarioId === focado.p.usuarioId)) || focado.p.nome} avatar={membros?.find((m) => m.usuarioId === focado.p.usuarioId)?.avatar} eu={eu} aoClicar={() => setFoco(null)} />
           </div>
         )}
         <div className="grade-quadros" data-qtd={Math.min(outros.length, 9)}>
@@ -84,6 +91,7 @@ function Palco({ visao, canal, pessoas }) {
               eu={eu}
               falando={falandoDe(voz, q.p, eu)}
               nome={nomeDe(membros?.find((m) => m.usuarioId === q.p.usuarioId)) || q.p.nome}
+              avatar={membros?.find((m) => m.usuarioId === q.p.usuarioId)?.avatar}
               moderador={moderador && q.p.usuarioId !== eu}
               aoModerar={voz.moderar}
               aoClicar={() => (q.stream ? setFoco(q.chave) : null)}
@@ -98,12 +106,12 @@ function Palco({ visao, canal, pessoas }) {
 
 const falandoDe = (voz, p, eu) => !p.mudo && !p.silenciado && !!voz.falando[p.usuarioId === eu ? 'eu' : p.usuarioId]
 
-function Quadro({ q, nome, falando, eu, moderador, aoModerar, aoClicar }) {
+function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, aoClicar }) {
   const { p } = q
   const [menu, setMenu] = useState(false)
   return (
     <div className={`quadro ${falando ? 'falando' : ''} ${q.stream ? 'com-video' : ''}`} onClick={aoClicar}>
-      {q.stream ? <Video stream={q.stream} espelhar={p.usuarioId === eu && !q.tela} /> : <Avatar nome={nome} id={p.usuarioId} tamanho={72} />}
+      {q.stream ? <Video stream={q.stream} espelhar={p.usuarioId === eu && !q.tela} /> : <Avatar nome={nome} id={p.usuarioId} src={avatar} tamanho={72} />}
       <div className="quadro-rodape">
         <span>
           {nome}
@@ -208,4 +216,12 @@ export function Controles({ perm, compacto }) {
       </button>
     </div>
   )
+}
+
+export function nomeTecla(codigo) {
+  if (!codigo) return 'uma tecla'
+  if (codigo.startsWith('Key')) return codigo.slice(3)
+  if (codigo.startsWith('Digit')) return codigo.slice(5)
+  const nomes = { Space: 'Espaço', ShiftLeft: 'Shift', ShiftRight: 'Shift', ControlLeft: 'Ctrl', ControlRight: 'Ctrl', AltLeft: 'Alt', AltRight: 'Alt Gr', Backquote: "'", CapsLock: 'Caps Lock', Tab: 'Tab' }
+  return nomes[codigo] || codigo.replace(/^Numpad/, 'Num ')
 }

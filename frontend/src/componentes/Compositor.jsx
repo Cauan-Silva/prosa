@@ -51,7 +51,7 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
     const pessoas = (membros || [])
       .filter((m) => [m.apelido, m.nomeExibicao, m.nomeUsuario].some((n) => n?.toLowerCase().includes(b)))
       .slice(0, 8)
-      .map((m) => ({ chave: `u${m.usuarioId}`, rotulo: nomeDe(m), detalhe: `@${m.nomeUsuario}`, codigo: `<@${m.usuarioId}>`, id: m.usuarioId }))
+      .map((m) => ({ chave: `u${m.usuarioId}`, rotulo: nomeDe(m), detalhe: `@${m.nomeUsuario}`, codigo: `<@${m.usuarioId}>`, id: m.usuarioId, avatar: m.avatar }))
     const podeTodos = tem(perm, P.MencionarTodos)
     const cargos = visao.cargos
       .filter((c) => !c.padrao && (c.mencionavel || podeTodos) && c.nome.toLowerCase().includes(b))
@@ -205,7 +205,7 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
           {opcoes.map((op, i) => (
             <li key={op.chave} role="option" aria-selected={i === sugestao.indice}>
               <button onMouseDown={(e) => (e.preventDefault(), escolher(op))}>
-                {op.id ? <Avatar nome={op.rotulo} id={op.id} tamanho={24} /> : <span className="sugestao-arroba">@</span>}
+                {op.id ? <Avatar nome={op.rotulo} id={op.id} src={op.avatar} tamanho={24} /> : <span className="sugestao-arroba">@</span>}
                 <strong>{op.rotulo}</strong>
                 <small>{op.detalhe}</small>
               </button>

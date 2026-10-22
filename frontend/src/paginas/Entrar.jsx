@@ -1,16 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Azulejo } from '../componentes/Azulejo.jsx'
 import { api } from '../servicos/api.js'
 import { useSessao } from '../servicos/sessao.jsx'
-
-// Nomes de servidores de exemplo para a parede de azulejos da tela de entrada.
-const parede = [
-  'Turma do café', 'Clube do livro', 'Futebol de quinta', 'Estudos de Go', 'Rádio da madrugada',
-  'Horta comunitária', 'Pedal de domingo', 'Cozinha da vó', 'Jogatina', 'Projeto final',
-  'Vizinhança', 'Trilha sonora', 'Fotografia', 'Xadrez', 'Viagem 2027', 'Bate-papo',
-  'Programação', 'Desenho livre', 'Tricô e prosa', 'Cinema em casa', 'Corrida', 'Família',
-  'Sebo virtual', 'Escalada',
-]
 
 export default function Entrar({ convite }) {
   const { entrar } = useSessao()
@@ -51,14 +41,13 @@ export default function Entrar({ convite }) {
 
   return (
     <main className="entrada">
-      <div className="entrada-parede" aria-hidden="true">
-        {Array.from({ length: 96 }, (_, i) => {
-          const nome = `${parede[i % parede.length]}${i >= parede.length ? ` ${i}` : ''}`
-          return <Azulejo key={i} nome={nome} tamanho={120} />
-        })}
+      <div className="entrada-arte" aria-hidden="true">
+        <img src="/capa.webp" alt="" />
       </div>
       <section className="entrada-cartao">
-        <h1 className="marca">Prosa</h1>
+        <h1 className="marca">
+          <img src="/icone-64.png" alt="" width="44" height="44" /> Prosa
+        </h1>
         {dadosConvite ? (
           <p className="entrada-convite">
             <strong>{dadosConvite.criadorNome}</strong> chamou você para <strong>{dadosConvite.servidorNome}</strong>.

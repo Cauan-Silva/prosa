@@ -6,6 +6,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { api, lerToken } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
+import { aoMudar, preferencias, usePreferencias } from './preferencias.js'
+import { Processador, abrirMicrofone } from './microfone.js'
 
 const Contexto = createContext(null)
 
@@ -57,16 +59,43 @@ class Sessao {
     const info = await api.vozInfo(canalId)
     this.ice = info.ice
     try {
-      const m = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-      this.faixas.audio = m.getAudioTracks()[0]
-      this.faixas.audio.enabled = !desejado.mudo
-      this.medir('eu', m)
+      await this.abrirMicrofone()
     } catch {
       this.semMicrofone = true // entra só para ouvir
     }
     await this.conectar(info.endereco, 0)
+  }
+
+  // Abre (ou reabre, ao trocar de microfone ou de opção) o microfone com o processamento.
+  async abrirMicrofone() {
+    const voz = preferencias().voz
+    const novo = new Processador(await abrirMicrofone(voz), voz)
+    const antigo = this.proc
+    this.proc = novo
+    novo.track.enabled = !this.desejado.mudo && !this.desejado.surdo
+    this.niveis.eu = () => novo.nivelSaida() * 128
+    await this.trocarFaixa('audio', novo.track)
+    antigo?.destruir()
+    this.semMicrofone = false
+  }
+
+  async aplicarVoz(antes, depois) {
+    const reabrir = ['microfone', 'supressaoRuido', 'cancelamentoEco', 'ganhoAutomatico'].some((k) => antes[k] !== depois[k])
+    if (reabrir && (this.proc || this.semMicrofone)) {
+      try {
+        await this.abrirMicrofone()
+      } catch {
+        // continua com o microfone anterior
+      }
+    } else this.proc?.setOpcoes(depois)
+    if (antes.camera !== depois.camera && this.faixas.camera) {
+      try {
+        const m = await navigator.mediaDevices.getUserMedia({ video: restricoesDeCamera(depois) })
+        await this.trocarFaixa('camera', m.getVideoTracks()[0])
+      } catch {
+        // câmera nova indisponível
+      }
+    }
   }
 
   conectar(endereco, tentativa) {
@@ -244,8 +273,13 @@ class Sessao {
     this.ws?.close()
     this.pc?.close()
     for (const f of Object.values(this.faixas)) f?.stop()
+    this.proc?.destruir()
     this.audio?.close().catch(() => {})
   }
+}
+
+function restricoesDeCamera(voz) {
+  return { width: 640, height: 360, frameRate: 24, deviceId: voz.camera ? { exact: voz.camera } : undefined }
 }
 
 export function VozProvider({ children }) {
@@ -326,7 +360,7 @@ export function VozProvider({ children }) {
     try {
       if (s.faixas.camera) await s.trocarFaixa('camera', null)
       else {
-        const m = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360, frameRate: 24 } })
+        const m = await navigator.mediaDevices.getUserMedia({ video: restricoesDeCamera(preferencias().voz) })
         await s.trocarFaixa('camera', m.getVideoTracks()[0])
       }
       s.enviarEstado()
@@ -383,6 +417,45 @@ export function VozProvider({ children }) {
 
   const moderar = useCallback((usuarioId, acao) => sessao.current?.mandar('VOZ_MODERAR', { usuarioId, acao }), [])
 
+  // Configurações de voz mudaram (microfone, supressão, portão…): aplica na hora.
+  useEffect(() => {
+    let antes = preferencias().voz
+    return aoMudar(() => {
+      const depois = preferencias().voz
+      if (depois !== antes) sessao.current?.aplicarVoz(antes, depois)
+      antes = depois
+    })
+  }, [])
+
+  // Pressionar para falar: segura a tecla escolhida (fora de campos de texto).
+  const [pttAtivo, setPttAtivo] = useState(false)
+  useEffect(() => {
+    if (estado.estado !== 'conectada') return
+    const digitando = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    const mudarPtt = (v) => {
+      sessao.current?.proc?.setPtt(v)
+      setPttAtivo(v)
+    }
+    const baixo = (e) => {
+      const voz = preferencias().voz
+      if (voz.modo !== 'ptt' || e.code !== voz.teclaPtt || e.repeat || digitando(document.activeElement)) return
+      e.preventDefault()
+      mudarPtt(true)
+    }
+    const cima = (e) => {
+      if (e.code === preferencias().voz.teclaPtt) mudarPtt(false)
+    }
+    const soltar = () => mudarPtt(false)
+    window.addEventListener('keydown', baixo)
+    window.addEventListener('keyup', cima)
+    window.addEventListener('blur', soltar)
+    return () => {
+      window.removeEventListener('keydown', baixo)
+      window.removeEventListener('keyup', cima)
+      window.removeEventListener('blur', soltar)
+    }
+  }, [estado.estado])
+
   const mudarModoTela = useCallback(async (modo) => {
     try {
       localStorage.setItem('prosa.modoTela', modo)
@@ -419,6 +492,7 @@ export function VozProvider({ children }) {
     alternarTela,
     moderar,
     mudarModoTela,
+    pttAtivo,
   }
 
   return (
@@ -439,9 +513,16 @@ export function VozProvider({ children }) {
 
 function Audio({ stream, mudo }) {
   const ref = useRef(null)
+  const { voz } = usePreferencias()
   useEffect(() => {
     if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream
   }, [stream])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.volume = Math.min(1, Math.max(0, voz.volumeSaida ?? 1))
+    if (el.setSinkId && voz.saida !== undefined) el.setSinkId(voz.saida || '').catch(() => {})
+  }, [voz.volumeSaida, voz.saida])
   return <audio ref={ref} autoPlay muted={mudo} />
 }
 

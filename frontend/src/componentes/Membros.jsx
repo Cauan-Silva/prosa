@@ -28,8 +28,15 @@ export default function Membros({ visao }) {
     return (
       <li key={m.usuarioId}>
         <button className={`membro ${estaOnline ? '' : 'offline'}`} onClick={() => setAberto(m.usuarioId)}>
-          <Avatar nome={m.nomeExibicao} id={m.usuarioId} tamanho={32} online={estaOnline} />
-          <span style={cor ? { color: cor } : undefined}>{nomeDe(m)}</span>
+          <Avatar nome={m.nomeExibicao} id={m.usuarioId} src={m.avatar} status={m.usuarioId === estado.eu.id ? estado.eu.status : m.status} tamanho={32} online={estaOnline} />
+          <span className="membro-nomes">
+            <span style={cor ? { color: cor } : undefined}>{nomeDe(m)}</span>
+            {estaOnline && (m.statusTexto || m.statusEmoji) && (
+              <small>
+                {m.statusEmoji} {m.statusTexto}
+              </small>
+            )}
+          </span>
           {m.usuarioId === visao.servidor.donoId && <small className="etiqueta">dono</small>}
           {castigo && <small className="etiqueta perigo">castigo</small>}
         </button>
