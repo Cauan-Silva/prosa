@@ -31,6 +31,18 @@ export function aoPttGlobal(fn) {
   }
 }
 
+/** "Sair da sala de voz" no menu do ícone ao lado do relógio. */
+export function aoSairDaVozDesktop(fn) {
+  if (!noDesktop || !tauri.event?.listen) return () => {}
+  let desligar = null
+  let vivo = true
+  tauri.event.listen('prosa-sair-voz', () => fn()).then((u) => (vivo ? (desligar = u) : u()))
+  return () => {
+    vivo = false
+    desligar?.()
+  }
+}
+
 export const inicioAutomatico = {
   ligado: () => invocar('plugin:autostart|is_enabled'),
   mudar: (ligar) => invocar(ligar ? 'plugin:autostart|enable' : 'plugin:autostart|disable'),

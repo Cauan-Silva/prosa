@@ -238,7 +238,7 @@ func (s *SFU) Conectar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() { // escrita
-		ping := time.NewTicker(20 * time.Second)
+		ping := time.NewTicker(10 * time.Second) // conexão morta sai da sala em até ~15 s
 		defer ping.Stop()
 		for {
 			select {
@@ -250,7 +250,7 @@ func (s *SFU) Conectar(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case <-ping.C:
-				c, cancelar := context.WithTimeout(vida, 10*time.Second)
+				c, cancelar := context.WithTimeout(vida, 5*time.Second)
 				err := ws.Ping(c)
 				cancelar()
 				if err != nil {

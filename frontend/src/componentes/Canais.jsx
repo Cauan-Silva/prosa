@@ -230,6 +230,11 @@ export function BarraVoz() {
   const canal = v?.canais.find((c) => c.id === voz.canalId)
   return (
     <div className="barra-voz">
+      {voz.somBloqueado && (
+        <button className="botao primario ativar-som" onClick={voz.liberarSom}>
+          <Icone nome="volume" tamanho={16} /> Ativar o som da sala
+        </button>
+      )}
       <button className="barra-voz-info" onClick={() => navegar(`/s/${voz.servidorId}/${voz.canalId}`)}>
         <strong className={voz.estado === 'conectada' ? 'ok' : ''}>
           <Icone nome="sinal" tamanho={16} />

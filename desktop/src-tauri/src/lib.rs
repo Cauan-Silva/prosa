@@ -168,13 +168,19 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![definir_ptt, versao_desktop])
         .setup(move |app| {
             let abrir = MenuItem::with_id(app, "abrir", "Abrir o Prosa", true, None::<&str>)?;
+            let sair_voz =
+                MenuItem::with_id(app, "sair-voz", "Sair da sala de voz", true, None::<&str>)?;
             let sair = MenuItem::with_id(app, "sair", "Sair do Prosa", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&abrir, &sair])?;
+            let menu = Menu::with_items(app, &[&abrir, &sair_voz, &sair])?;
             let mut bandeja = TrayIconBuilder::with_id("prosa")
                 .tooltip("Prosa")
                 .menu(&menu)
                 .on_menu_event(|app, evento| match evento.id.as_ref() {
                     "abrir" => mostrar(app),
+                    // a janela pode estar escondida: o site sai da sala mesmo assim
+                    "sair-voz" => {
+                        let _ = app.emit("prosa-sair-voz", ());
+                    }
                     "sair" => app.exit(0),
                     _ => {}
                 })

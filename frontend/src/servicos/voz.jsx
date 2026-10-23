@@ -12,7 +12,7 @@ import { api, lerToken } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
 import { aoMudar, mudar, preferencias, usePreferencias } from './preferencias.js'
 import { Processador, abrirMicrofone } from './microfone.js'
-import { aoPttGlobal, definirPttGlobal, noDesktop } from './desktop.js'
+import { aoPttGlobal, aoSairDaVozDesktop, definirPttGlobal, noDesktop } from './desktop.js'
 
 const Contexto = createContext(null)
 const TIPOS = ['audio', 'camera', 'tela', 'telaAudio']
@@ -643,20 +643,25 @@ export function VozProvider({ children }) {
   // No programa para Windows, quem vigia a tecla é o próprio Windows: funciona com o Prosa
   // em segundo plano (jogo em tela cheia, outra janela).
   const { voz: prefsVoz } = usePreferencias()
-  const pttGlobal = noDesktop && estado.estado === 'conectada' && prefsVoz.modo === 'ptt'
+  const querGlobal = noDesktop && estado.estado === 'conectada' && prefsVoz.modo === 'ptt'
+  const [pttGlobal, setPttGlobal] = useState(false) // o programa confirmou que vigia a tecla
   useEffect(() => {
-    if (!pttGlobal) return
-    definirPttGlobal(prefsVoz.teclaPtt)
+    if (!querGlobal) return
+    let vivo = true
+    definirPttGlobal(prefsVoz.teclaPtt).then((ok) => vivo && setPttGlobal(!!ok))
     const parar = aoPttGlobal((v) => {
       sessao.current?.proc?.setPtt(v)
       setPttAtivo(v)
     })
     return () => {
+      vivo = false
+      setPttGlobal(false)
       parar()
       definirPttGlobal('')
     }
-  }, [pttGlobal, prefsVoz.teclaPtt])
+  }, [querGlobal, prefsVoz.teclaPtt])
   useEffect(() => {
+    // a tecla dentro da janela vale sempre, a não ser que o programa já esteja vigiando
     if (estado.estado !== 'conectada' || pttGlobal) return
     const digitando = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
     const mudarPtt = (v) => {
@@ -707,8 +712,33 @@ export function VozProvider({ children }) {
 
   const s = sessao.current
   // recalculado a cada mudança (as faixas chegam fora do React e avisam com atualizar())
+  // Fechar ou recarregar a aba sai da sala na hora (sem esperar o servidor perceber).
+  useEffect(() => {
+    const fechando = () => sessao.current?.sair()
+    window.addEventListener('pagehide', fechando)
+    return () => window.removeEventListener('pagehide', fechando)
+  }, [])
+
+  // Programa para Windows: "Sair da sala de voz" no ícone ao lado do relógio.
+  useEffect(() => aoSairDaVozDesktop(() => sair()), [sair])
+
+  // Alguns navegadores (e o WebView do Windows) só tocam som depois de um clique.
+  const [somBloqueado, setSomBloqueado] = useState(false)
+  useEffect(() => {
+    const bloqueou = () => setSomBloqueado(true)
+    window.addEventListener('prosa:som-bloqueado', bloqueou)
+    return () => window.removeEventListener('prosa:som-bloqueado', bloqueou)
+  }, [])
+  const liberarSom = useCallback(() => {
+    setSomBloqueado(false)
+    contextoSaida?.resume().catch(() => {})
+    for (const a of document.querySelectorAll('audio.voz-audio')) a.play().catch(() => {})
+  }, [])
+
   const valor = {
     ...estado,
+    somBloqueado,
+    liberarSom,
     falando,
     remotos: s?.remotos || {},
     modo: s?.modo || null,
@@ -742,6 +772,12 @@ export function VozProvider({ children }) {
 // Um AudioContext para todos os volumes acima de 100% (o <audio> só vai até 100%).
 let contextoSaida = null
 
+// Tenta tocar; se o navegador bloquear (falta de clique), avisa para mostrar o botão "Ativar som".
+function tocarOuAvisar(el) {
+  const p = el.play?.()
+  p?.catch?.((e) => e?.name === 'NotAllowedError' && window.dispatchEvent(new Event('prosa:som-bloqueado')))
+}
+
 /**
  * Toca a voz de alguém. Até 100% usa o volume do próprio <audio>; acima disso passa por
  * um ganho do Web Audio. O <audio> mudo com o som original continua existindo porque o
@@ -761,6 +797,7 @@ function Audio({ stream, mudo, ganho = 1 }) {
     if (!amplificar) {
       if (el.srcObject !== stream) el.srcObject = stream
       ganhoNo.current = null
+      tocarOuAvisar(el)
       return
     }
     try {
@@ -772,6 +809,7 @@ function Audio({ stream, mudo, ganho = 1 }) {
       fonte.connect(g).connect(destino)
       ganhoNo.current = g
       el.srcObject = destino.stream
+      tocarOuAvisar(el)
       if (bruto.current) bruto.current.srcObject = stream
       return () => {
         fonte.disconnect()
@@ -799,7 +837,7 @@ function Audio({ stream, mudo, ganho = 1 }) {
 
   return (
     <>
-      <audio ref={ref} autoPlay muted={mudo || total === 0} />
+      <audio ref={ref} className="voz-audio" autoPlay muted={mudo || total === 0} />
       {amplificar && <audio ref={bruto} autoPlay muted />}
     </>
   )

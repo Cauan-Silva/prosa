@@ -2155,6 +2155,7 @@ button.mencao:hover {
 }
 .barra-voz {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 8px 8px 8px 12px;
@@ -3702,4 +3703,12 @@ kbd {
   .app.com-membros:has(.painel-fio) > .membros {
     display: none;
   }
+}
+
+.ativar-som {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
 }

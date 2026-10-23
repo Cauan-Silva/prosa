@@ -3,7 +3,8 @@
 Programa feito com [Tauri 2](https://tauri.app): uma janela com o site do Prosa (o mesmo do servidor) mais o que o navegador não consegue fazer:
 
 - **Pressionar para falar global**: a tecla escolhida funciona com o Prosa em segundo plano, até em jogo em tela cheia. Uma thread consulta a tecla direto no Windows (`GetAsyncKeyState`), então a tecla continua funcionando normalmente nos outros programas.
-- **Ícone na bandeja** (ao lado do relógio): fechar a janela só esconde, e a voz continua. Para sair, clique com o botão direito no ícone.
+- **Ícone na bandeja** (ao lado do relógio): fechar a janela só esconde, e a voz continua (como no Discord). Clique com o botão direito no ícone para **sair da sala de voz** ou **sair do Prosa**.
+- **Sem freio em segundo plano**: o WebView roda com o som liberado sem clique e sem a redução de timers de janelas escondidas, então a voz e o filtro de ruído funcionam normalmente com o Prosa no ícone.
 - **Abrir junto com o Windows** (em Configurações → App), começando escondido.
 - **Uma instância só**: abrir de novo mostra a janela que já está aberta.
 

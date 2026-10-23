@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Prosa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.cauansilva.prosa",
   "build": {
     "frontendDist": "../site"
@@ -17,7 +17,8 @@
         "height": 800,
         "minWidth": 380,
         "minHeight": 560,
-        "center": true
+        "center": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {
