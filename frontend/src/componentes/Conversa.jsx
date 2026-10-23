@@ -4,6 +4,7 @@ import Mensagem from './Mensagem.jsx'
 import Compositor from './Compositor.jsx'
 import Busca from './Busca.jsx'
 import Fixadas from './Fixadas.jsx'
+import { ListaFios, PainelFio } from './Fios.jsx'
 import SalaVoz from './SalaVoz.jsx'
 import { useEstado } from '../servicos/estado.jsx'
 import { api } from '../servicos/api.js'
@@ -16,8 +17,16 @@ export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembr
   const [busca, setBusca] = useState(null) // termo buscado
   const [termo, setTermo] = useState('')
   const [fixadas, setFixadas] = useState(false)
+  const [listaFios, setListaFios] = useState(false)
+  const [fio, setFio] = useState(null) // fio aberto no painel lateral
   const { estado } = useEstado()
-  useEffect(() => setFixadas(false), [canal.id])
+  useEffect(() => {
+    setFixadas(false)
+    setListaFios(false)
+    setFio(null)
+  }, [canal.id])
+  const membros = estado.membros[visao.servidor.id]
+  const fecharFio = useCallback(() => setFio(null), [])
 
   return (
     <main className="conversa">
@@ -41,8 +50,25 @@ export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembr
         </form>
         {canal.tipo === 'texto' && (
           <button
+            className={`icone-botao ${listaFios ? 'ligado' : ''}`}
+            onClick={() => {
+              setListaFios((l) => !l)
+              setFixadas(false)
+            }}
+            aria-pressed={listaFios}
+            aria-label="Fios do canal"
+            title="Fios"
+          >
+            <Icone nome="fio" />
+          </button>
+        )}
+        {canal.tipo === 'texto' && (
+          <button
             className={`icone-botao ${fixadas ? 'ligado' : ''}`}
-            onClick={() => setFixadas((f) => !f)}
+            onClick={() => {
+              setFixadas((f) => !f)
+              setListaFios(false)
+            }}
             aria-pressed={fixadas}
             aria-label="Mensagens fixadas"
             title="Mensagens fixadas"
@@ -62,21 +88,25 @@ export default function Conversa({ visao, canal, mostrarMembros, aoAlternarMembr
       </header>
 
       <div className="conversa-corpo">
-        {canal.tipo === 'voz' ? <SalaVoz visao={visao} canal={canal} /> : <CanalTexto visao={visao} canal={canal} />}
+        {canal.tipo === 'voz' ? <SalaVoz visao={visao} canal={canal} /> : <CanalTexto visao={visao} canal={canal} aoAbrirFio={setFio} />}
         {busca && <Busca visao={visao} termo={busca} aoFechar={() => setBusca(null)} />}
         {fixadas && !busca && canal.tipo === 'texto' && (
-          <Fixadas visao={visao} canal={canal} membros={estado.membros[visao.servidor.id]} aoFechar={() => setFixadas(false)} />
+          <Fixadas visao={visao} canal={canal} membros={membros} aoFechar={() => setFixadas(false)} />
         )}
+        {listaFios && !busca && !fio && canal.tipo === 'texto' && (
+          <ListaFios canal={canal} aoAbrir={(f) => setFio(f)} aoFechar={() => setListaFios(false)} />
+        )}
+        {fio && canal.tipo === 'texto' && <PainelFio visao={visao} canalPai={canal} fio={fio} membros={membros} aoFechar={fecharFio} />}
       </div>
     </main>
   )
 }
 
-function CanalTexto({ visao, canal }) {
+export function CanalTexto({ visao, canal, membros: membrosConversa, aoAbrirFio }) {
   const { estado, despachar } = useEstado()
   const dados = estado.mensagens[canal.id]
   const lista = dados?.lista
-  const membros = estado.membros[visao.servidor.id]
+  const membros = membrosConversa || estado.membros[visao.servidor.id]
   const rolagem = useRef(null)
   const noFim = useRef(true)
   const alturaAntes = useRef(null)
@@ -153,13 +183,31 @@ function CanalTexto({ visao, canal }) {
 
   return (
     <div className="canal-texto">
-      <div className="mensagens" ref={rolagem} onScroll={rolou} role="log" aria-live="polite" aria-label={`Mensagens de #${canal.nome}`}>
+      <div className="mensagens" ref={rolagem} onScroll={rolou} role="log" aria-live="polite" aria-label={canal.tipoConversa ? `Mensagens com ${canal.nome}` : `Mensagens de #${canal.nome}`}>
         {!lista && !erro && <p className="aviso-lista">Carregando mensagens…</p>}
         {erro && <p className="erro">{erro}</p>}
         {lista && dados.inicio && (
           <div className="inicio-canal">
-            <h2>Começo de #{canal.nome}</h2>
-            <p>{canal.topico || 'Este é o primeiro recado do canal. Diga oi!'}</p>
+            {canal.ehFio ? (
+              <>
+                <h2>{canal.nome}</h2>
+                <p>Começo do fio. As respostas daqui ficam separadas do canal.</p>
+              </>
+            ) : canal.tipoConversa ? (
+              <>
+                <h2>{canal.nome}</h2>
+                <p>
+                  {canal.tipoConversa === 'dm'
+                    ? `Começo da sua conversa com @${canal.outros?.[0]?.nomeUsuario || canal.nome}.`
+                    : 'Começo do grupo. Só quem está nele vê estas mensagens.'}
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>Começo de #{canal.nome}</h2>
+                <p>{canal.topico || 'Este é o primeiro recado do canal. Diga oi!'}</p>
+              </>
+            )}
           </div>
         )}
         {carregandoAntigas && <p className="aviso-lista">Carregando mensagens antigas…</p>}
@@ -191,6 +239,7 @@ function CanalTexto({ visao, canal }) {
                 editando={editando === m.id}
                 aoEditar={setEditando}
                 aoResponder={setRespondendo}
+                aoAbrirFio={aoAbrirFio}
               />
             </Fragment>
           )

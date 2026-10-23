@@ -21,6 +21,7 @@ export const PADRAO = {
     saida: '',
     camera: '',
     supressaoRuido: true,
+    supressaoIA: false, // RNNoise (rede neural) no lugar da supressão do navegador
     cancelamentoEco: true,
     ganhoAutomatico: true,
     filtroRuido: false, // portão: corta o som abaixo da sensibilidade

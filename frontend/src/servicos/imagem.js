@@ -2,10 +2,11 @@
  * Recorta a imagem no meio (como "cobrir") e converte para WebP no tamanho certo.
  * GIFs pequenos vão como estão, para não perder a animação.
  */
-export async function recortar(arquivo, largura, altura, { manterGif = false } = {}) {
-  if (manterGif && arquivo.type === 'image/gif' && arquivo.size <= 4 << 20) return arquivo
+export async function recortar(arquivo, largura, altura, { manterGif = false, conter = false, limiteGif = 4 << 20 } = {}) {
+  if (manterGif && arquivo.type === 'image/gif' && arquivo.size <= limiteGif) return arquivo
   const img = await createImageBitmap(arquivo)
-  const escala = Math.max(largura / img.width, altura / img.height)
+  // conter: a imagem inteira cabe no quadro (sobra transparente); senão, cobre e corta as bordas
+  const escala = (conter ? Math.min : Math.max)(largura / img.width, altura / img.height)
   const w = img.width * escala
   const h = img.height * escala
   const canvas = document.createElement('canvas')

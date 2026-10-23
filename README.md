@@ -18,12 +18,16 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - **Convites** por link com validade e limite de usos
 
 **Conversa**
+- **Fios (threads)**: conversas paralelas que nascem de uma mensagem, num painel ao lado do canal, com as mesmas permissões dele
 - Mensagens com **respostas**, **menções** (`@pessoa`, `@cargo`, `@todos`) com autocompletar, **reações**, edição (↑ edita a última) e exclusão
 - **Mensagens fixadas** por canal, com painel para ver todas
 - **Prévia de links** com título, descrição e imagem do site (buscada pelo servidor só em endereços públicos; `<link>` manda sem prévia)
 - Formatação: `**negrito**`, `*itálico*`, `~~riscado~~`, `||spoiler||`, `` `código` ``, blocos de código e links
+- **Emojis do servidor** (até 50, inclusive animados): usados com `:nome:` (com sugestões), pelo seletor de emojis ou como reação, e aparecem grandes quando a mensagem só tem emojis
+- **Enquetes** com até 10 opções, uma ou várias escolhas, prazo e resultado ao vivo
 - **Anexos** (arrastar, colar ou escolher) com prévia de imagens, vídeo e áudio, guardados num S3 compatível
 - **Quem está digitando**, **quem está online**, mensagens **não lidas** por canal e **menções** em destaque
+- **Amigos e mensagens diretas**: pedidos de amizade pelo @nome, amigos online, bloqueio, conversas a dois e **grupos de até 10 pessoas**, com tudo o que os canais têm (anexos, reações, menções, quem está digitando)
 - **Busca** em português (“pizzas” acha “pizza”) só nos canais que você pode ler
 - **Modo lento** por canal e limite de mensagens por pessoa contra flood
 
@@ -36,10 +40,11 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 **Perfil e configurações**
 - **Perfil** com foto, banner, cor, pronomes, “sobre mim” e status (online, ausente, não perturbe, invisível) com texto e emoji; quem divide servidor com você vê o cartão completo ao clicar no seu nome
 - **Aparência**: 9 temas (Azulejo, Meia-noite, Neon, Grafite, Floresta, Café, Rosa, Alto contraste…), qualquer cor de destaque, 5 fontes, tamanho da interface, mensagens compactas e cantos retos. Fica salvo na conta e vale em qualquer navegador
-- **Voz e vídeo**: escolha de microfone, saída e câmera, teste de microfone com medidor, supressão de ruído e de eco, **filtro de ruído (portão)** com sensibilidade ajustável e **pressionar para falar** com tecla configurável
+- **Voz e vídeo**: escolha de microfone, saída e câmera, teste de microfone com medidor, **supressão de ruído com IA** (RNNoise rodando num AudioWorklet), supressão de eco, **filtro de ruído (portão)** com sensibilidade ajustável e **pressionar para falar** com tecla configurável
 - **Notificações do sistema** e **sons** da interface, com volume; o status “não perturbe” silencia tudo
 - **Acessibilidade**: escala, alto contraste, fonte de leitura fácil, sem animações, links sublinhados
 - **Instalável** como aplicativo (PWA) no computador e no celular
+- **Programa para Windows** ([Tauri](desktop/)): pressionar para falar funcionando com o Prosa em segundo plano (até em jogo em tela cheia), ícone na bandeja e abrir junto com o Windows. O instalador é gerado pelo GitHub Actions
 
 **Visual próprio**: logo do Prosa e um **azulejo** desenhado a partir do nome de cada servidor. Funciona no celular.
 
@@ -95,7 +100,7 @@ Duas otimizações vieram do teste: cada evento é convertido em JSON uma vez s�
 - **Segurança:** senhas com PBKDF2-SHA256 e JWT HS256 com a biblioteca padrão, limite de tentativas de login por IP, tipo dos anexos detectado pelo conteúdo, cabeçalhos de segurança (CSP, nosniff, frame-ancestors)
 - **Telas:** React 19 e Vite, sem outras dependências (estado, roteador, WebRTC e formatação de texto escritos à mão)
 - **Infra:** Docker (imagem distroless), docker-compose com 2 instâncias + Caddy + Redis + PostgreSQL, Render, Neon e GitHub Actions
-- **Testes:** 38 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
+- **Testes:** 42 testes em Go, incluindo ponta a ponta com PostgreSQL, WebSocket de verdade e duas instâncias ligadas por Redis
 
 ## Como rodar no seu computador
 
@@ -200,6 +205,19 @@ Todas as rotas, menos cadastro, login, saúde e ver convite, pedem `Authorizatio
 | PUT | `/api/eu/preferencias` | Salva tema, cores, voz e notificações na conta |
 | POST, DELETE | `/api/eu/avatar`, `/api/eu/banner` | Envia / tira foto e banner |
 | POST, DELETE | `/api/servidores/{id}/icone` | Envia / tira a imagem do servidor |
+| POST | `/api/servidores/{id}/emojis` | Emoji novo (multipart: nome e arquivo) |
+| PATCH, DELETE | `/api/servidores/{id}/emojis/{emoji}` | Renomear / apagar emoji |
+| POST | `/api/canais/{id}/mensagens/{msg}/fio` | Criar o fio de uma mensagem (as mensagens do fio usam `/api/canais/{fio}/...`) |
+| GET | `/api/canais/{id}/fios` | Fios do canal |
+| PATCH, DELETE | `/api/canais/{fio}/fio` | Renomear / apagar o fio |
+| PUT | `/api/canais/{id}/mensagens/{msg}/votos` | Votar na enquete (`{"opcoes": [0]}`) |
+| POST | `/api/canais/{id}/mensagens/{msg}/encerrar` | Encerrar a enquete |
+| GET, POST | `/api/amigos` | Amigos, pedidos e bloqueados / pedir amizade pelo @nome |
+| PUT, DELETE | `/api/amigos/{usuario}` | Pedir ou aceitar / desfazer, recusar ou cancelar |
+| PUT, DELETE | `/api/bloqueios/{usuario}` | Bloquear / desbloquear |
+| GET, POST | `/api/conversas` | Suas DMs e grupos / abrir DM ou criar grupo (as mensagens usam `/api/canais/{id}/...`) |
+| PATCH, DELETE | `/api/conversas/{id}` | Renomear o grupo / fechar a DM |
+| POST, DELETE | `/api/conversas/{id}/membros[/{usuario}]` | Adicionar ao grupo / sair ou tirar |
 | GET | `/api/usuarios/{u}` | Perfil de quem divide servidor com você |
 | GET | `/api/perfis/{u}/{arquivo}` | Imagem de perfil (pública, nome aleatório) |
 | GET | `/api/eu/mencoes` | Últimas mensagens que mencionaram você |
@@ -234,10 +252,10 @@ Todas as rotas, menos cadastro, login, saúde e ver convite, pedem `Authorizatio
 | GET | `/api/saude` | Verificação de saúde |
 
 **Gateway** (JSON `{"t": tipo, "s": servidor, "c": canal, "d": dados}`):
-- **Do servidor:** `PRONTO` (tudo, ao conectar), `USUARIO_ALTERADO`, `SERVIDOR_CRIADO`/`ALTERADO`/`APAGADO`, `CANAL_*`, `CATEGORIA_*`, `CARGO_*`, `MEMBRO_ENTROU`/`ALTERADO`/`SAIU`, `MENSAGEM_CRIADA`/`EDITADA`/`APAGADA`, `REACAO_ADICIONADA`/`REMOVIDA`, `DIGITANDO`, `PRESENCA`, `VOZ_ESTADO`, `PERMISSOES_ALTERADAS`.
+- **Do servidor:** `PRONTO` (tudo, ao conectar), `USUARIO_ALTERADO`, `SERVIDOR_CRIADO`/`ALTERADO`/`APAGADO`, `CANAL_*`, `CATEGORIA_*`, `CARGO_*`, `MEMBRO_ENTROU`/`ALTERADO`/`SAIU`, `MENSAGEM_CRIADA`/`EDITADA`/`APAGADA`, `REACAO_ADICIONADA`/`REMOVIDA`, `DIGITANDO`, `PRESENCA`, `VOZ_ESTADO`, `PERMISSOES_ALTERADAS`, `EMOJIS_ALTERADOS`, `FIO_ATUALIZADO`, `AMIGO_ALTERADO`, `CONVERSA_ALTERADA` (eventos sem servidor, como os de DMs, chegam com `s` vazio).
 - **Do navegador:** `DIGITANDO` e `PING`.
 
-**Voz:** o servidor manda `VOZ_PRONTO`, `VOZ_OFERTA` (com o mapa de quais transceptores são microfone, câmera e tela), `VOZ_ICE`, `VOZ_REDIRECIONAR` e `VOZ_ERRO`; o navegador manda `VOZ_RESPOSTA`, `VOZ_ICE`, `VOZ_ESTADO` e `VOZ_MODERAR`.
+**Voz:** o servidor manda `VOZ_PRONTO`, `VOZ_OFERTA` (com o mapa de quais transceptores são microfone, câmera e tela), `VOZ_ICE`, `VOZ_REDIRECIONAR` e `VOZ_ERRO`; o navegador manda `VOZ_RESPOSTA`, `VOZ_ICE`, `VOZ_ESTADO` e `VOZ_MODERAR`. Em salas pequenas (modo direto), `VOZ_SALA` diz o modo e quem está na sala, e `VOZ_P2P` leva oferta, resposta e candidatos de um navegador para outro.
 
 ## Estrutura
 
@@ -253,20 +271,24 @@ backend/
     ├── auth/            # PBKDF2 e JWT com a biblioteca padrão
     ├── banco/           # conexão e migrações SQL embutidas
     ├── config/          # variáveis de ambiente
+    ├── diretas/         # amigos, bloqueios, DMs e grupos
     ├── eventos/         # Hub de tópicos, publicação local e pelo Redis
     ├── gateway/         # WebSocket de tempo real com filtro por permissão
-    ├── mensagens/       # mensagens, menções, reações, busca, lido e anexos
+    ├── mensagens/       # mensagens, menções, reações, fios, enquetes, fixadas, busca e anexos
     ├── permissoes/      # o cálculo das permissões (puro, sem banco)
     ├── presenca/        # quem está online (memória ou Redis)
+    ├── previas/         # prévias de links (só endereços públicos)
     ├── servidor/        # rotas, segurança e testes de ponta a ponta
-    ├── servidores/      # servidores, canais, cargos, membros, moderação e convites
+    ├── servidores/      # servidores, canais, cargos, emojis, membros, moderação e convites
     ├── usuarios/        # cadastro e login
     ├── voz/             # SFU com Pion e coordenação das salas entre instâncias
     └── web/             # serve o React embutido no binário
 frontend/src/
 ├── componentes/         # Canais, Conversa, Mensagem, Compositor, SalaVoz, configurações…
 ├── paginas/             # Entrar e Aplicativo
-└── servicos/            # API, estado + gateway, voz (WebRTC), permissões, texto, roteador
+└── servicos/            # API, estado + gateway, voz (WebRTC), microfone (RNNoise), permissões, texto, roteador
+frontend/public/ruido/   # RNNoise em WebAssembly + o AudioWorklet que o roda
+desktop/                 # programa para Windows (Tauri 2, Rust)
 ```
 
 ## Licença

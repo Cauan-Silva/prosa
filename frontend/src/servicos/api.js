@@ -88,6 +88,17 @@ async function enviarImagem(endereco, blob, nome) {
 export const enviarImagemPerfil = (campo, blob) => enviarImagem(`/api/eu/${campo}`, blob, campo)
 export const enviarIconeServidor = (id, blob) => enviarImagem(`/api/servidores/${id}/icone`, blob, 'icone')
 
+/** Emoji novo do servidor (nome + imagem já reduzida). */
+export async function enviarEmoji(servidorId, nome, blob) {
+  const corpo = new FormData()
+  corpo.append('nome', nome)
+  corpo.append('arquivo', blob, blob.type === 'image/gif' ? 'emoji.gif' : 'emoji.webp')
+  const r = await fetch(`/api/servidores/${servidorId}/emojis`, { method: 'POST', headers: { Authorization: `Bearer ${lerToken()}` }, body: corpo })
+  const dados = await r.json().catch(() => ({}))
+  if (!r.ok) throw new ErroApi(dados.erro || 'Não foi possível enviar o emoji.', r.status)
+  return dados
+}
+
 /** Endereço de um anexo com o token (o <img> não manda o cabeçalho Authorization). */
 export const enderecoAnexo = (endereco) => `${endereco}?t=${encodeURIComponent(lerToken() || '')}`
 
@@ -157,9 +168,30 @@ export const api = {
   reagir: (canal, msg, emoji) => pedir('PUT', `${cn(canal)}/mensagens/${msg}/reacoes/${encodeURIComponent(emoji)}`),
   desreagir: (canal, msg, emoji) => pedir('DELETE', `${cn(canal)}/mensagens/${msg}/reacoes/${encodeURIComponent(emoji)}`),
   fixar: (canal, msg) => pedir('PUT', `${cn(canal)}/mensagens/${msg}/fixar`),
+
+  amigos: () => pedir('GET', '/api/amigos'),
+  pedirAmizadePorNome: (nomeUsuario) => pedir('POST', '/api/amigos', { nomeUsuario }),
+  pedirAmizade: (id) => pedir('PUT', `/api/amigos/${id}`),
+  removerAmigo: (id) => pedir('DELETE', `/api/amigos/${id}`),
+  bloquear: (id) => pedir('PUT', `/api/bloqueios/${id}`),
+  desbloquear: (id) => pedir('DELETE', `/api/bloqueios/${id}`),
+  conversas: () => pedir('GET', '/api/conversas'),
+  criarConversa: (usuarios, nome = '') => pedir('POST', '/api/conversas', { usuarios, nome }),
+  alterarConversa: (id, dados) => pedir('PATCH', `/api/conversas/${id}`, dados),
+  fecharConversa: (id) => pedir('DELETE', `/api/conversas/${id}`),
+  adicionarAoGrupo: (id, usuarioId) => pedir('POST', `/api/conversas/${id}/membros`, { usuarioId }),
+  tirarDoGrupo: (id, usuarioId) => pedir('DELETE', `/api/conversas/${id}/membros/${usuarioId}`),
   desfixar: (canal, msg) => pedir('DELETE', `${cn(canal)}/mensagens/${msg}/fixar`),
   fixadas: (canal) => pedir('GET', `${cn(canal)}/fixadas`),
   previa: (url) => pedir('GET', `/api/previa?url=${encodeURIComponent(url)}`),
+  criarFio: (canal, msg, nome = '') => pedir('POST', `${cn(canal)}/mensagens/${msg}/fio`, { nome }),
+  fios: (canal) => pedir('GET', `${cn(canal)}/fios`),
+  alterarFio: (fio, nome) => pedir('PATCH', `${cn(fio)}/fio`, { nome }),
+  apagarFio: (fio) => pedir('DELETE', `${cn(fio)}/fio`),
+  votar: (canal, msg, opcoes) => pedir('PUT', `${cn(canal)}/mensagens/${msg}/votos`, { opcoes }),
+  encerrarEnquete: (canal, msg) => pedir('POST', `${cn(canal)}/mensagens/${msg}/encerrar`),
+  renomearEmoji: (id, emoji, nome) => pedir('PATCH', `${sv(id)}/emojis/${emoji}`, { nome }),
+  apagarEmoji: (id, emoji) => pedir('DELETE', `${sv(id)}/emojis/${emoji}`),
   marcarLido: (canal, mensagemId) => pedir('POST', `${cn(canal)}/lido`, { mensagemId }),
   vozInfo: (canal) => pedir('GET', `${cn(canal)}/voz`),
 }

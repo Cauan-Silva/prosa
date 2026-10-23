@@ -27,7 +27,8 @@ type Estrutura struct {
 	ServidorID   int64
 	Servidor     permissoes.Servidor
 	Posicoes     map[int64]int                      // posição de cada cargo
-	Canais       map[int64]string                   // id → tipo ("texto" ou "voz")
+	Canais       map[int64]string                   // id → tipo ("texto", "voz" ou "fio")
+	Pais         map[int64]int64                    // fio → canal pai (de quem ele herda as permissões)
 	Sobrescritas map[int64][]permissoes.Sobrescrita // por canal
 }
 
@@ -36,7 +37,28 @@ type Contexto struct {
 	*Estrutura
 	Membro permissoes.Membro
 	agora  func() time.Time
+	fixas  map[int64]permissoes.Permissao // conversas diretas: permissões fixas por canal
 }
+
+// PermissoesDiretas é o que cada participante pode numa DM ou grupo.
+const PermissoesDiretas = permissoes.VerCanal | permissoes.LerHistorico | permissoes.EnviarMensagens |
+	permissoes.AnexarArquivos | permissoes.AdicionarReacoes
+
+// Direto monta o contexto de uma conversa direta: sem servidor, com permissões fixas.
+func Direto(canalID, usuarioID int64, perm permissoes.Permissao) *Contexto {
+	e := &Estrutura{
+		Servidor:     permissoes.Servidor{Cargos: map[int64]permissoes.Permissao{}},
+		Posicoes:     map[int64]int{},
+		Canais:       map[int64]string{canalID: "texto"},
+		Sobrescritas: map[int64][]permissoes.Sobrescrita{},
+	}
+	c := Novo(e, permissoes.Membro{UsuarioID: usuarioID})
+	c.fixas = map[int64]permissoes.Permissao{canalID: perm}
+	return c
+}
+
+// EhDireto diz se o contexto é de uma conversa direta (sem servidor).
+func (c *Contexto) EhDireto() bool { return c.fixas != nil }
 
 type Consulta interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -50,6 +72,7 @@ func CarregarEstrutura(ctx context.Context, db Consulta, servidorID int64) (*Est
 		Servidor:     permissoes.Servidor{Cargos: map[int64]permissoes.Permissao{}},
 		Posicoes:     map[int64]int{},
 		Canais:       map[int64]string{},
+		Pais:         map[int64]int64{},
 		Sobrescritas: map[int64][]permissoes.Sobrescrita{},
 	}
 	err := db.QueryRowContext(ctx, `SELECT dono_id FROM servidores WHERE id = $1`, servidorID).Scan(&e.Servidor.DonoID)
@@ -80,18 +103,22 @@ func CarregarEstrutura(ctx context.Context, db Consulta, servidorID int64) (*Est
 	}
 	linhas.Close()
 
-	linhas, err = db.QueryContext(ctx, `SELECT id, tipo FROM canais WHERE servidor_id = $1`, servidorID)
+	linhas, err = db.QueryContext(ctx, `SELECT id, tipo, pai_id FROM canais WHERE servidor_id = $1`, servidorID)
 	if err != nil {
 		return nil, err
 	}
 	for linhas.Next() {
 		var id int64
 		var tipo string
-		if err := linhas.Scan(&id, &tipo); err != nil {
+		var pai sql.NullInt64
+		if err := linhas.Scan(&id, &tipo, &pai); err != nil {
 			linhas.Close()
 			return nil, err
 		}
 		e.Canais[id] = tipo
+		if pai.Valid {
+			e.Pais[id] = pai.Int64
+		}
 	}
 	linhas.Close()
 
@@ -160,13 +187,22 @@ func Novo(e *Estrutura, m permissoes.Membro) *Contexto {
 
 // Base são as permissões no servidor (sem canal).
 func (c *Contexto) Base() permissoes.Permissao {
+	if c.fixas != nil {
+		return 0
+	}
 	return permissoes.Base(c.Servidor, c.Membro, c.agora())
 }
 
 // NoCanal são as permissões num canal (0 se o canal não for deste servidor).
 func (c *Contexto) NoCanal(canalID int64) permissoes.Permissao {
+	if c.fixas != nil {
+		return c.fixas[canalID]
+	}
 	if _, ok := c.Canais[canalID]; !ok {
 		return 0
+	}
+	if pai, ok := c.Pais[canalID]; ok {
+		canalID = pai // um fio tem as permissões do canal de onde saiu
 	}
 	return permissoes.NoCanal(c.Servidor, c.Membro, c.Sobrescritas[canalID], c.agora())
 }

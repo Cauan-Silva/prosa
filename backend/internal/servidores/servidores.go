@@ -124,7 +124,8 @@ type VisaoServidor struct {
 		Cargos       []int64    `json:"cargos"`
 		CastigadoAte *time.Time `json:"castigadoAte,omitempty"`
 	} `json:"eu"`
-	TotalMembros int `json:"totalMembros"`
+	TotalMembros int     `json:"totalMembros"`
+	Emojis       []Emoji `json:"emojis"`
 }
 
 // Visao monta o servidor como a pessoa o vê (canais escondidos ficam de fora).
@@ -138,6 +139,9 @@ func (s *Servico) Visao(ctx context.Context, servidorID, usuarioID int64) (Visao
 		return v, err
 	}
 	if v.Cargos, err = s.cargos(ctx, servidorID); err != nil {
+		return v, err
+	}
+	if v.Emojis, err = s.emojis(ctx, servidorID); err != nil {
 		return v, err
 	}
 	if v.Categorias, err = s.categorias(ctx, servidorID); err != nil {
@@ -342,7 +346,7 @@ func lerCanal(l interface{ Scan(...any) error }) (Canal, error) {
 
 func (s *Servico) canais(ctx context.Context, servidorID int64) ([]Canal, error) {
 	linhas, err := s.db.QueryContext(ctx,
-		`SELECT `+colunasCanal+` FROM canais WHERE servidor_id = $1 ORDER BY posicao, id`, servidorID)
+		`SELECT `+colunasCanal+` FROM canais WHERE servidor_id = $1 AND tipo <> 'fio' ORDER BY posicao, id`, servidorID)
 	if err != nil {
 		return nil, err
 	}

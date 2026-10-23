@@ -179,13 +179,22 @@ func (s *Servico) avisar(ctx context.Context, u Usuario) {
 			slog.Warn("perfil: publicar", "erro", err)
 		}
 	}
-	// as outras abas da própria pessoa também atualizam
+	// as outras abas da própria pessoa, os amigos e quem conversa com ela em DM ou grupo
 	e := eventos.Novo(eventos.UsuarioAlterado, 0, 0, dados)
 	e.UsuarioID = u.ID
-	_ = s.pub.Publicar(ctx, eventos.TopicoUsuario(u.ID), e)
+	var outros pq.Int64Array
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(array_agg(DISTINCT id), '{}') FROM (
+			SELECT CASE WHEN de_id = $1 THEN para_id ELSE de_id END AS id FROM amizades WHERE estado = 'aceita' AND (de_id = $1 OR para_id = $1)
+			UNION SELECT b.usuario_id FROM conversa_membros a JOIN conversa_membros b ON b.canal_id = a.canal_id WHERE a.usuario_id = $1 AND b.usuario_id <> $1
+		) t`, u.ID).Scan(&outros)
+	for _, id := range append([]int64{u.ID}, outros...) {
+		_ = s.pub.Publicar(ctx, eventos.TopicoUsuario(id), e)
+	}
 }
 
-// VerPerfil: GET /api/usuarios/{usuario} — só de quem divide algum servidor com você.
+// VerPerfil: GET /api/usuarios/{usuario} — de quem divide servidor ou conversa com você,
+// é seu amigo ou tem um pedido de amizade com você. Vem junto a relação entre vocês.
 func (s *Servico) VerPerfil(w http.ResponseWriter, r *http.Request) error {
 	id, err := strconv.ParseInt(r.PathValue("usuario"), 10, 64)
 	naoAchou := api.NovoErro(http.StatusNotFound, "Pessoa não encontrada.")
@@ -194,13 +203,23 @@ func (s *Servico) VerPerfil(w http.ResponseWriter, r *http.Request) error {
 	}
 	eu := api.Quem(r).UsuarioID
 	var servidores pq.Int64Array
+	var relacao string
+	var conversa, bloqueei bool
 	if err := s.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(array_agg(a.servidor_id), '{}') FROM membros a
-		JOIN membros b ON b.servidor_id = a.servidor_id AND b.usuario_id = $2
-		WHERE a.usuario_id = $1`, id, eu).Scan(&servidores); err != nil {
+		SELECT (SELECT COALESCE(array_agg(a.servidor_id), '{}') FROM membros a
+		        JOIN membros b ON b.servidor_id = a.servidor_id AND b.usuario_id = $2 WHERE a.usuario_id = $1),
+		       COALESCE((SELECT CASE WHEN estado = 'aceita' THEN 'amigo' WHEN de_id = $2 THEN 'pedido_enviado' ELSE 'pedido_recebido' END
+		                 FROM amizades WHERE (de_id = $1 AND para_id = $2) OR (de_id = $2 AND para_id = $1)), ''),
+		       EXISTS (SELECT 1 FROM conversa_membros a JOIN conversa_membros b ON b.canal_id = a.canal_id
+		               WHERE a.usuario_id = $1 AND b.usuario_id = $2),
+		       EXISTS (SELECT 1 FROM bloqueios WHERE quem_id = $2 AND bloqueado_id = $1)`, id, eu).
+		Scan(&servidores, &relacao, &conversa, &bloqueei); err != nil {
 		return err
 	}
-	if id != eu && len(servidores) == 0 {
+	if bloqueei {
+		relacao = "bloqueado"
+	}
+	if id != eu && len(servidores) == 0 && relacao == "" && !conversa {
 		return naoAchou
 	}
 	u, err := s.Buscar(r.Context(), id)
@@ -211,7 +230,8 @@ func (s *Servico) VerPerfil(w http.ResponseWriter, r *http.Request) error {
 		PerfilPublico
 		CriadoEm          time.Time `json:"criadoEm"`
 		ServidoresEmComum []int64   `json:"servidoresEmComum"`
-	}{publico(u), u.CriadoEm, servidores})
+		Relacao           string    `json:"relacao"` // amigo, pedido_enviado, pedido_recebido, bloqueado ou ""
+	}{publico(u), u.CriadoEm, servidores, relacao})
 	return nil
 }
 

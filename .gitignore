@@ -16,3 +16,8 @@ backend/internal/web/dist/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# programa para Windows (Tauri)
+/desktop/node_modules/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/

@@ -25,6 +25,7 @@ import (
 
 	"github.com/Cauan-Silva/prosa/internal/acesso"
 	"github.com/Cauan-Silva/prosa/internal/auth"
+	"github.com/Cauan-Silva/prosa/internal/diretas"
 	"github.com/Cauan-Silva/prosa/internal/eventos"
 	"github.com/Cauan-Silva/prosa/internal/permissoes"
 	"github.com/Cauan-Silva/prosa/internal/presenca"
@@ -237,6 +238,20 @@ func (g *Gateway) avisarPresenca(ctx context.Context, c *Conexao, online bool) {
 			slog.Warn("gateway: presença", "erro", err)
 		}
 	}
+	g.avisarAmigos(ctx, c.Usuario.UsuarioID, online)
+}
+
+// avisarAmigos manda a presença (sem servidor) para os amigos, que veem na lista de amigos.
+func (g *Gateway) avisarAmigos(ctx context.Context, id int64, online bool) {
+	amigos, err := diretas.AmigosDe(ctx, g.DB, id)
+	if err != nil {
+		slog.Warn("gateway: amigos", "erro", err)
+		return
+	}
+	e := eventos.Novo(eventos.Presenca, 0, 0, map[string]any{"usuarioId": id, "online": online})
+	for _, a := range amigos {
+		_ = g.Publicador.Publicar(ctx, eventos.TopicoUsuario(a), e)
+	}
 }
 
 func (g *Gateway) invisivel(ctx context.Context, id int64) bool {
@@ -258,6 +273,7 @@ func (g *Gateway) MudouVisibilidade(ctx context.Context, id int64, invisivel boo
 	for _, sid := range ids {
 		_ = g.Publicador.Publicar(ctx, eventos.TopicoServidor(sid), eventos.Novo(eventos.Presenca, sid, 0, dados))
 	}
+	g.avisarAmigos(ctx, id, !invisivel)
 }
 
 // semInvisiveis tira do mapa de online quem está invisível (menos a própria pessoa).
@@ -362,8 +378,10 @@ func (g *Gateway) montarPronto(ctx context.Context, c *Conexao) (pronto, error) 
 // a visão do servidor (canais que apareceram ou sumiram, botões de moderação...).
 func assinatura(c *acesso.Contexto) string {
 	ids := make([]int64, 0, len(c.Canais))
-	for id := range c.Canais {
-		ids = append(ids, id)
+	for id, tipo := range c.Canais {
+		if tipo != "fio" { // fios seguem o canal pai: não mudam o que a pessoa vê
+			ids = append(ids, id)
+		}
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	var b strings.Builder
@@ -478,7 +496,13 @@ func (c *Conexao) processar(ctx context.Context, e eventos.Evento) []saida {
 	}
 
 	var extra []saida
-	if eventos.MudaPermissoes(e.Tipo) || c.servidores[e.ServidorID] == nil {
+	// canal que esta conexão ainda não conhece (ex.: fio criado agora): recarrega as permissões
+	desconhecido := false
+	if ac := c.servidores[e.ServidorID]; ac != nil && e.CanalID != 0 {
+		_, conhece := ac.Canais[e.CanalID]
+		desconhecido = !conhece
+	}
+	if eventos.MudaPermissoes(e.Tipo) || c.servidores[e.ServidorID] == nil || desconhecido {
 		ac, err := c.Contexto(ctx, e.ServidorID)
 		if err != nil {
 			return nil
@@ -569,15 +593,40 @@ func (c *Conexao) digitando(ctx context.Context, canalID int64) error {
 		return nil
 	}
 	c.digitou.Store(canalID, agora)
-	var servidorID int64
-	if err := c.g.DB.QueryRowContext(ctx, `SELECT servidor_id FROM canais WHERE id = $1 AND tipo = 'texto'`, canalID).Scan(&servidorID); err != nil {
+	var servidorID sql.NullInt64
+	var tipo string
+	if err := c.g.DB.QueryRowContext(ctx, `SELECT servidor_id, tipo FROM canais WHERE id = $1`, canalID).Scan(&servidorID, &tipo); err != nil {
 		return nil
 	}
-	ac, err := c.Contexto(ctx, servidorID)
+	if tipo == "dm" || tipo == "grupo" {
+		return c.digitandoDireto(ctx, canalID)
+	}
+	if tipo != "texto" && tipo != "fio" {
+		return nil
+	}
+	ac, err := c.Contexto(ctx, servidorID.Int64)
 	if err != nil || !ac.NoCanal(canalID).Tem(permissoes.EnviarMensagens) {
 		return nil
 	}
-	e := eventos.Novo(eventos.Digitando, servidorID, canalID, map[string]any{"usuarioId": c.Usuario.UsuarioID, "nome": c.Usuario.Nome})
+	e := eventos.Novo(eventos.Digitando, servidorID.Int64, canalID, map[string]any{"usuarioId": c.Usuario.UsuarioID, "nome": c.Usuario.Nome})
 	e.Exige = uint64(permissoes.VerCanal)
-	return c.g.Publicador.Publicar(ctx, eventos.TopicoServidor(servidorID), e)
+	return c.g.Publicador.Publicar(ctx, eventos.TopicoServidor(servidorID.Int64), e)
+}
+
+// digitandoDireto avisa os outros participantes de uma DM ou grupo.
+func (c *Conexao) digitandoDireto(ctx context.Context, canalID int64) error {
+	var ids pq.Int64Array
+	if err := c.g.DB.QueryRowContext(ctx, `
+		SELECT array_agg(usuario_id) FROM conversa_membros
+		WHERE canal_id = $1 AND EXISTS (SELECT 1 FROM conversa_membros WHERE canal_id = $1 AND usuario_id = $2)`,
+		canalID, c.Usuario.UsuarioID).Scan(&ids); err != nil || len(ids) == 0 {
+		return nil
+	}
+	e := eventos.Novo(eventos.Digitando, 0, canalID, map[string]any{"usuarioId": c.Usuario.UsuarioID, "nome": c.Usuario.Nome})
+	for _, id := range ids {
+		if id != c.Usuario.UsuarioID {
+			_ = c.g.Publicador.Publicar(ctx, eventos.TopicoUsuario(id), e)
+		}
+	}
+	return nil
 }

@@ -168,7 +168,7 @@ const STATUS = [
   ['invisivel', 'Invisível', 'Você aparece offline, mas usa tudo normalmente'],
 ]
 
-function Rodape({ aoAbrir }) {
+export function Rodape({ aoAbrir }) {
   const { estado, despachar } = useEstado()
   const [menu, setMenu] = useState(false)
   const ref = useRef(null)
@@ -222,7 +222,7 @@ function Rodape({ aoAbrir }) {
   )
 }
 
-function BarraVoz() {
+export function BarraVoz() {
   const { estado } = useEstado()
   const voz = useVoz()
   if (!voz.canalId) return null

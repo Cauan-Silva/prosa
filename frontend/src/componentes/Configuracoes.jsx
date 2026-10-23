@@ -13,6 +13,7 @@ import { FONTES, TEMAS, coresDe } from '../servicos/aparencia.js'
 import { configSons, mudarSons, tocar } from '../servicos/sons.js'
 import { Processador, abrirMicrofone } from '../servicos/microfone.js'
 import { corHex } from '../servicos/formato.js'
+import { LINK_DOWNLOAD, inicioAutomatico, noDesktop, versaoDesktop } from '../servicos/desktop.js'
 
 const ABAS = [
   ['conta', 'Minha conta', 'pessoas'],
@@ -48,7 +49,12 @@ export default function Configuracoes({ aba: inicial, aoFechar }) {
           {aba === 'voz' && <Voz />}
           {aba === 'notificacoes' && <Notificacoes />}
           {aba === 'acessibilidade' && <Acessibilidade />}
-          {aba === 'app' && <Instalar />}
+          {aba === 'app' && (
+            <>
+              <ProgramaWindows />
+              {!noDesktop && <Instalar />}
+            </>
+          )}
         </div>
       </div>
     </Modal>
@@ -496,9 +502,16 @@ function Voz() {
       <h3>Ruído e eco</h3>
       <div className="lista-opcoes">
         <Interruptor
-          rotulo="Supressão de ruído"
-          dica="Tira ventilador, chiado e barulho constante da sua voz (feito pelo navegador)"
-          ligado={voz.supressaoRuido}
+          rotulo="Supressão de ruído com IA (RNNoise)"
+          dica="Uma rede neural tira teclado, ventilador, latido e barulho de fundo, deixando só a voz. Usa um pouco mais de processador; quando ligada, a supressão do navegador fica desligada."
+          ligado={!!voz.supressaoIA}
+          aoMudar={(v) => m({ supressaoIA: v })}
+        />
+        <Interruptor
+          rotulo="Supressão de ruído do navegador"
+          dica={voz.supressaoIA ? 'Desligada enquanto a supressão com IA estiver ligada' : 'Tira ventilador, chiado e barulho constante da sua voz (mais leve, menos forte que a IA)'}
+          ligado={voz.supressaoRuido && !voz.supressaoIA}
+          desativado={!!voz.supressaoIA}
           aoMudar={(v) => m({ supressaoRuido: v })}
         />
         <Interruptor
@@ -661,6 +674,60 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault()
   pedidoInstalacao = e
 })
+
+function ProgramaWindows() {
+  const [auto, setAuto] = useState(null)
+  const [versao, setVersao] = useState('')
+  const [erro, setErro] = useState('')
+  useEffect(() => {
+    if (!noDesktop) return
+    inicioAutomatico.ligado().then(setAuto).catch(() => setAuto(false))
+    versaoDesktop().then(setVersao)
+  }, [])
+  if (noDesktop) {
+    return (
+      <section>
+        <h2>Programa para Windows</h2>
+        <p className="dica">Você está usando o Prosa para Windows{versao ? ` (versão ${versao})` : ''}. Fechar a janela deixa o Prosa no ícone ao lado do relógio; para sair de vez, clique com o botão direito nele.</p>
+        <Interruptor
+          rotulo="Abrir junto com o Windows"
+          dica="O Prosa começa escondido no ícone ao lado do relógio"
+          ligado={!!auto}
+          desativado={auto === null}
+          aoMudar={async (v) => {
+            setErro('')
+            try {
+              await inicioAutomatico.mudar(v)
+              setAuto(v)
+            } catch (e) {
+              setErro(String(e))
+            }
+          }}
+        />
+        {erro && <p className="erro">{erro}</p>}
+        <p className="dica">“Pressionar para falar” funciona mesmo com outra janela na frente, inclusive jogos em tela cheia.</p>
+      </section>
+    )
+  }
+  return (
+    <section>
+      <h2>Programa para Windows</h2>
+      <div className="instalar">
+        <img src="/icone-192.png" alt="" width="96" height="96" />
+        <div>
+          <p>
+            Com o programa, o <strong>pressionar para falar funciona com o Prosa em segundo plano</strong> (até em jogo em tela cheia), o Prosa fica no
+            ícone ao lado do relógio e pode abrir junto com o Windows.
+          </p>
+          <a className="botao primario grande" href={LINK_DOWNLOAD} target="_blank" rel="noopener noreferrer">
+            Baixar para Windows
+          </a>
+          <p className="dica">Na página que abrir, baixe o arquivo que termina em <code>-setup.exe</code>. Se o Windows avisar que o programa não é conhecido, clique em “Mais informações” → “Executar assim mesmo”.</p>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 function Instalar() {
   const [pode, setPode] = useState(!!pedidoInstalacao)

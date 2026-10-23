@@ -2,13 +2,18 @@
 // se ligado, passa por um "portão" que só deixa a voz passar quando ela fica acima da
 // sensibilidade — o ruído de fundo (ventilador, teclado) some nos intervalos da fala.
 // Também é por aqui que o "pressionar para falar" abre e fecha o microfone.
+//
+// Com a supressão com IA ligada, o som passa antes pelo RNNoise (uma rede neural pequena
+// que separa voz de ruído), rodando num AudioWorklet (public/ruido/rnnoise-worklet.js).
 import { preferencias } from './preferencias.js'
+
+let binarioRnnoise = null // baixado uma vez só (110 KB)
 
 export function restricoesDeAudio(voz = preferencias().voz) {
   return {
     deviceId: voz.microfone ? { exact: voz.microfone } : undefined,
     echoCancellation: voz.cancelamentoEco,
-    noiseSuppression: voz.supressaoRuido,
+    noiseSuppression: voz.supressaoRuido && !voz.supressaoIA, // as duas juntas pioram a voz
     autoGainControl: voz.ganhoAutomatico,
     channelCount: 1,
   }
@@ -29,12 +34,14 @@ export async function abrirMicrofone(voz = preferencias().voz) {
 export class Processador {
   constructor(stream, opcoes) {
     this.original = stream
-    this.ctx = new AudioContext()
+    // o RNNoise só funciona a 48 kHz (o navegador converte o microfone se precisar)
+    this.ctx = new AudioContext(opcoes?.supressaoIA ? { sampleRate: 48000 } : undefined)
     const fonte = this.ctx.createMediaStreamSource(stream)
     // corta o zumbido grave (rede elétrica, vento) antes de tudo
     const passaAlta = this.ctx.createBiquadFilter()
     passaAlta.type = 'highpass'
     passaAlta.frequency.value = 85
+    this.passaAlta = passaAlta
     this.analisador = this.ctx.createAnalyser()
     this.analisador.fftSize = 1024
     this.portao = this.ctx.createGain()
@@ -43,6 +50,8 @@ export class Processador {
     fonte.connect(passaAlta)
     passaAlta.connect(this.analisador)
     passaAlta.connect(this.portao).connect(saida)
+    this.ia = 'desligada' // desligada | carregando | ligada | indisponivel
+    if (opcoes?.supressaoIA) this.ligarIA()
     // nível depois do portão (para mostrar quem está falando)
     this.analisadorSaida = this.ctx.createAnalyser()
     this.analisadorSaida.fftSize = 512
@@ -56,6 +65,36 @@ export class Processador {
     this.pttApertado = false
     this.opcoes = opcoes
     this.timer = setInterval(() => this.passo(), 20)
+  }
+
+  // Coloca o RNNoise entre o filtro de graves e o resto. Se o navegador não tiver
+  // AudioWorklet ou WebAssembly, continua sem (e o som segue normal).
+  async ligarIA() {
+    this.ia = 'carregando'
+    try {
+      binarioRnnoise ||= fetch('/ruido/rnnoise.wasm').then((r) => {
+        if (!r.ok) throw new Error('rnnoise.wasm não encontrado')
+        return r.arrayBuffer()
+      })
+      const [binario] = await Promise.all([binarioRnnoise, this.ctx.audioWorklet.addModule('/ruido/rnnoise-worklet.js')])
+      if (this.ctx.state === 'closed') return
+      const no = new AudioWorkletNode(this.ctx, 'rnnoise', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { wasm: binario.slice(0) },
+      })
+      this.passaAlta.disconnect()
+      this.passaAlta.connect(no)
+      no.connect(this.analisador)
+      no.connect(this.portao)
+      this.noIA = no
+      this.ia = 'ligada'
+    } catch (e) {
+      binarioRnnoise = null
+      this.ia = 'indisponivel'
+      console.warn('supressão com IA indisponível:', e)
+    }
   }
 
   setOpcoes(opcoes) {
@@ -102,6 +141,7 @@ export class Processador {
 
   destruir() {
     clearInterval(this.timer)
+    this.noIA?.port.postMessage('parar')
     for (const t of this.original.getTracks()) t.stop()
     this.track.stop()
     this.ctx.close().catch(() => {})

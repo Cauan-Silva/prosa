@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from './Modal.jsx'
 import CartaoPerfil from './CartaoPerfil.jsx'
+import { conversarCom } from './Diretas.jsx'
 import { nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
@@ -21,19 +22,25 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
   const [ocupado, setOcupado] = useState(false)
   const [completo, setCompleto] = useState(null)
 
-  // bio, banner e pronomes vêm do perfil completo
+  // bio, banner, pronomes e a relação (amigo, pedido…) vêm do perfil completo
+  const [versao, setVersao] = useState(0)
   useEffect(() => {
     api.perfil(usuarioId).then(setCompleto).catch(() => {})
-  }, [usuarioId, m?.avatar, m?.statusTexto])
+  }, [usuarioId, m?.avatar, m?.statusTexto, versao, estado.amigos])
 
   const souEu = usuarioId === estado.eu.id
   const perfil = { ...(completo || {}), ...(m || {}), ...(souEu ? estado.eu : {}), usuarioId }
-  const onlineAgora = souEu || !!(sid && estado.online[sid]?.[usuarioId])
+  const onlineAgora = souEu || !!(sid && estado.online[sid]?.[usuarioId]) || !!estado.online[0]?.[usuarioId]
+  const acoes = !souEu && completo && (
+    <AcoesSociais usuarioId={usuarioId} relacao={completo.relacao} nome={perfil.nomeExibicao} aoFechar={aoFechar} aoMudar={() => setVersao((v) => v + 1)} />
+  )
   if (!m) {
     if (!completo && !souEu) return null
     return (
       <Modal titulo={perfil.nomeExibicao} aoFechar={aoFechar} largura="perfil" semTopo>
-        <CartaoPerfil perfil={perfil} />
+        <CartaoPerfil perfil={perfil} online={onlineAgora}>
+          {acoes}
+        </CartaoPerfil>
       </Modal>
     )
   }
@@ -66,6 +73,7 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
   return (
     <Modal titulo={nomeDe(m)} aoFechar={aoFechar} largura="perfil" semTopo>
       <CartaoPerfil perfil={perfil} online={onlineAgora} apelido={m.apelido} desde={m.entrouEm}>
+      {acoes}
       {castigo && <p className="erro">De castigo até {new Date(m.castigadoAte).toLocaleString('pt-BR')}</p>}
       <h4 className="perfil-secao">Cargos</h4>
       <ul className="chips">
@@ -169,5 +177,70 @@ export default function CartaoMembro({ visao, usuarioId, aoFechar }) {
       {erro && <p className="erro">{erro}</p>}
       </CartaoPerfil>
     </Modal>
+  )
+}
+
+/** Mensagem direta, amizade e bloqueio, no cartão de perfil de outra pessoa. */
+function AcoesSociais({ usuarioId, relacao, nome, aoFechar, aoMudar }) {
+  const { despachar, carregarAmigos } = useEstado()
+  const [erro, setErro] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+
+  async function fazer(acao, fechar) {
+    setErro('')
+    setOcupado(true)
+    try {
+      await acao()
+      carregarAmigos()
+      if (fechar) aoFechar()
+      else aoMudar()
+    } catch (e) {
+      setErro(e.message)
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  if (relacao === 'bloqueado') {
+    return (
+      <div className="acoes-sociais">
+        <p className="dica">Você bloqueou esta pessoa.</p>
+        <button className="botao" disabled={ocupado} onClick={() => fazer(() => api.desbloquear(usuarioId))}>
+          Desbloquear
+        </button>
+        {erro && <p className="erro">{erro}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="acoes-sociais">
+      <button className="botao primario" disabled={ocupado} onClick={() => fazer(() => conversarCom(usuarioId, despachar), true)}>
+        Mensagem
+      </button>
+      {relacao === '' && (
+        <button className="botao" disabled={ocupado} onClick={() => fazer(() => api.pedirAmizade(usuarioId))}>
+          Adicionar amigo
+        </button>
+      )}
+      {relacao === 'pedido_recebido' && (
+        <button className="botao sucesso" disabled={ocupado} onClick={() => fazer(() => api.pedirAmizade(usuarioId))}>
+          Aceitar amizade
+        </button>
+      )}
+      {relacao === 'pedido_enviado' && (
+        <button className="botao" disabled={ocupado} onClick={() => fazer(() => api.removerAmigo(usuarioId))} title="Clique para cancelar o pedido">
+          Pedido enviado (cancelar)
+        </button>
+      )}
+      {relacao === 'amigo' && <span className="etiqueta amigos-etiqueta">Amigos</span>}
+      <button
+        className="botao-link perigo"
+        disabled={ocupado}
+        onClick={() => confirm(`Bloquear ${nome}? Vocês deixam de ser amigos e essa pessoa não consegue mais mandar mensagem direta para você.`) && fazer(() => api.bloquear(usuarioId))}
+      >
+        Bloquear
+      </button>
+      {erro && <p className="erro">{erro}</p>}
+    </div>
   )
 }

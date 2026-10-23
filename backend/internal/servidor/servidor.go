@@ -14,6 +14,7 @@ import (
 	"github.com/Cauan-Silva/prosa/internal/api"
 	"github.com/Cauan-Silva/prosa/internal/arquivos"
 	"github.com/Cauan-Silva/prosa/internal/auth"
+	"github.com/Cauan-Silva/prosa/internal/diretas"
 	"github.com/Cauan-Silva/prosa/internal/eventos"
 	"github.com/Cauan-Silva/prosa/internal/gateway"
 	"github.com/Cauan-Silva/prosa/internal/mensagens"
@@ -67,6 +68,7 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	if o.Presenca == nil {
 		o.Presenca = presenca.NovoLocal()
 	}
+	d := diretas.NovoServico(o.DB, o.Publicador, o.Presenca)
 	u.AoMudarStatus = func(ctx context.Context, id int64, invisivel bool) { sv.Gateway.MudouVisibilidade(ctx, id, invisivel) }
 	sv.Gateway = &gateway.Gateway{
 		DB: o.DB, Emissor: o.Emissor, Hub: o.Hub, Publicador: o.Publicador, Presenca: o.Presenca,
@@ -99,6 +101,20 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	mux.HandleFunc("GET /api/perfis/{usuario}/{arquivo}", u.Imagem)
 	logado("GET /api/eu/mencoes", m.MinhasMencoes)
 
+	// amigos, bloqueios e conversas diretas (as mensagens usam as rotas dos canais)
+	logado("GET /api/amigos", d.Listar)
+	logado("POST /api/amigos", d.PedirPorNome)
+	logado("PUT /api/amigos/{usuario}", d.Pedir)
+	logado("DELETE /api/amigos/{usuario}", d.Remover)
+	logado("PUT /api/bloqueios/{usuario}", d.Bloquear)
+	logado("DELETE /api/bloqueios/{usuario}", d.Desbloquear)
+	logado("GET /api/conversas", d.ListarConversas)
+	logado("POST /api/conversas", d.CriarConversa)
+	logado("PATCH /api/conversas/{canal}", d.AlterarConversa)
+	logado("DELETE /api/conversas/{canal}", d.FecharConversa)
+	logado("POST /api/conversas/{canal}/membros", d.AdicionarAoGrupo)
+	logado("DELETE /api/conversas/{canal}/membros/{usuario}", d.TirarDoGrupo)
+
 	// servidores
 	logado("GET /api/servidores", s.Meus)
 	logado("POST /api/servidores", s.Criar)
@@ -107,6 +123,10 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	logado("DELETE /api/servidores/{servidor}", s.Apagar)
 	logado("DELETE /api/servidores/{servidor}/eu", s.Sair)
 	logado("POST /api/servidores/{servidor}/icone", s.EnviarIcone)
+	logado("POST /api/servidores/{servidor}/emojis", s.CriarEmoji)
+	logado("PATCH /api/servidores/{servidor}/emojis/{emoji}", s.AlterarEmoji)
+	logado("DELETE /api/servidores/{servidor}/emojis/{emoji}", s.ApagarEmoji)
+	mux.HandleFunc("GET /api/emojis/{emoji}", s.ImagemEmoji)
 	logado("DELETE /api/servidores/{servidor}/icone", s.ApagarIcone)
 	mux.HandleFunc("GET /api/icones/{servidor}/{arquivo}", s.Icone)
 	logado("GET /api/servidores/{servidor}/busca", m.Buscar)
@@ -159,6 +179,12 @@ func Novo(o Opcoes) (http.Handler, Servicos) {
 	logado("PUT /api/canais/{canal}/mensagens/{mensagem}/fixar", m.Fixar)
 	logado("DELETE /api/canais/{canal}/mensagens/{mensagem}/fixar", m.Desfixar)
 	logado("GET /api/canais/{canal}/fixadas", m.Fixadas)
+	logado("PUT /api/canais/{canal}/mensagens/{mensagem}/votos", m.Votar)
+	logado("POST /api/canais/{canal}/mensagens/{mensagem}/fio", m.CriarFio)
+	logado("GET /api/canais/{canal}/fios", m.ListarFios)
+	logado("PATCH /api/canais/{canal}/fio", m.AlterarFio)
+	logado("DELETE /api/canais/{canal}/fio", m.ApagarFio)
+	logado("POST /api/canais/{canal}/mensagens/{mensagem}/encerrar", m.Encerrar)
 	logado("GET /api/previa", previas.Novo(o.DB, false).Rota)
 	logado("POST /api/canais/{canal}/anexos", m.EnviarAnexo)
 	// O <img> do navegador não manda o cabeçalho Authorization: o token também pode vir em ?t=
@@ -204,7 +230,7 @@ func seguranca(proximo http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=()")
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; "+
+			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; "+
 				"connect-src 'self' ws: wss: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'")
 		}

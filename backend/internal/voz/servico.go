@@ -120,7 +120,7 @@ func idDaRota(r *http.Request, nome string) (int64, error) {
 func (s *SFU) canalDeVoz(ctx context.Context, canalID, usuarioID int64) (*acesso.Contexto, error) {
 	var servidorID int64
 	var tipo string
-	err := s.o.DB.QueryRowContext(ctx, `SELECT servidor_id, tipo FROM canais WHERE id = $1`, canalID).Scan(&servidorID, &tipo)
+	err := s.o.DB.QueryRowContext(ctx, `SELECT COALESCE(servidor_id, 0), tipo FROM canais WHERE id = $1`, canalID).Scan(&servidorID, &tipo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, acesso.ErrCanalSumiu
 	}

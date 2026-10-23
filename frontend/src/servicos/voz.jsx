@@ -12,6 +12,7 @@ import { api, lerToken } from './api.js'
 import { salaDeVoz, tocar } from './sons.js'
 import { aoMudar, mudar, preferencias, usePreferencias } from './preferencias.js'
 import { Processador, abrirMicrofone } from './microfone.js'
+import { aoPttGlobal, definirPttGlobal, noDesktop } from './desktop.js'
 
 const Contexto = createContext(null)
 const TIPOS = ['audio', 'camera', 'tela', 'telaAudio']
@@ -102,7 +103,7 @@ class Sessao {
   }
 
   async aplicarVoz(antes, depois) {
-    const reabrir = ['microfone', 'supressaoRuido', 'cancelamentoEco', 'ganhoAutomatico'].some((k) => antes[k] !== depois[k])
+    const reabrir = ['microfone', 'supressaoRuido', 'supressaoIA', 'cancelamentoEco', 'ganhoAutomatico'].some((k) => antes[k] !== depois[k])
     if (reabrir && (this.proc || this.semMicrofone)) {
       try {
         await this.abrirMicrofone()
@@ -639,8 +640,24 @@ export function VozProvider({ children }) {
 
   // Pressionar para falar: segura a tecla escolhida (fora de campos de texto).
   const [pttAtivo, setPttAtivo] = useState(false)
+  // No programa para Windows, quem vigia a tecla é o próprio Windows: funciona com o Prosa
+  // em segundo plano (jogo em tela cheia, outra janela).
+  const { voz: prefsVoz } = usePreferencias()
+  const pttGlobal = noDesktop && estado.estado === 'conectada' && prefsVoz.modo === 'ptt'
   useEffect(() => {
-    if (estado.estado !== 'conectada') return
+    if (!pttGlobal) return
+    definirPttGlobal(prefsVoz.teclaPtt)
+    const parar = aoPttGlobal((v) => {
+      sessao.current?.proc?.setPtt(v)
+      setPttAtivo(v)
+    })
+    return () => {
+      parar()
+      definirPttGlobal('')
+    }
+  }, [pttGlobal, prefsVoz.teclaPtt])
+  useEffect(() => {
+    if (estado.estado !== 'conectada' || pttGlobal) return
     const digitando = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
     const mudarPtt = (v) => {
       sessao.current?.proc?.setPtt(v)
@@ -664,7 +681,7 @@ export function VozProvider({ children }) {
       window.removeEventListener('keyup', cima)
       window.removeEventListener('blur', soltar)
     }
-  }, [estado.estado])
+  }, [estado.estado, pttGlobal])
 
   const mudarModoTela = useCallback(async (modo) => {
     try {

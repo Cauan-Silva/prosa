@@ -85,6 +85,8 @@ type Mensagem struct {
 	Anexos        []Anexo    `json:"anexos"`
 	EditadaEm     *time.Time `json:"editadaEm,omitempty"`
 	FixadaEm      *time.Time `json:"fixadaEm,omitempty"`
+	Enquete       *Enquete   `json:"enquete,omitempty"`
+	Fio           *Fio       `json:"fio,omitempty"` // fio que nasceu desta mensagem
 	CriadaEm      time.Time  `json:"criadaEm"`
 }
 
@@ -104,7 +106,7 @@ func (s *Servico) canal(r *http.Request) (*acesso.Contexto, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	var servidorID int64
+	var servidorID sql.NullInt64
 	var tipo string
 	err = s.db.QueryRowContext(r.Context(), `SELECT servidor_id, tipo FROM canais WHERE id = $1`, canalID).Scan(&servidorID, &tipo)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -113,10 +115,14 @@ func (s *Servico) canal(r *http.Request) (*acesso.Contexto, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	if tipo != "texto" {
+	if tipo == "dm" || tipo == "grupo" {
+		c, err := s.contextoDireto(r.Context(), canalID, api.Quem(r).UsuarioID, tipo)
+		return c, canalID, err
+	}
+	if tipo != "texto" && tipo != "fio" {
 		return nil, 0, api.NovoErro(http.StatusBadRequest, "Canais de voz não têm mensagens.")
 	}
-	c, err := acesso.Carregar(r.Context(), s.db, servidorID, api.Quem(r).UsuarioID)
+	c, err := acesso.Carregar(r.Context(), s.db, servidorID.Int64, api.Quem(r).UsuarioID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -124,6 +130,10 @@ func (s *Servico) canal(r *http.Request) (*acesso.Contexto, int64, error) {
 }
 
 func (s *Servico) publicar(ctx context.Context, e eventos.Evento) {
+	if e.ServidorID == 0 {
+		s.publicarDireto(ctx, e)
+		return
+	}
 	if err := s.pub.Publicar(ctx, eventos.TopicoServidor(e.ServidorID), e); err != nil {
 		slog.Error("não foi possível publicar o evento", "tipo", e.Tipo, "erro", err)
 	}
@@ -139,7 +149,7 @@ func eventoDoCanal(tipo string, servidorID, canalID int64, dados any) eventos.Ev
 // ---- leitura ----
 
 const consultaMensagens = `
-	SELECT m.id, m.canal_id, c.servidor_id, m.autor_id, u.nome_usuario, u.nome_exibicao,
+	SELECT m.id, m.canal_id, COALESCE(c.servidor_id, 0), m.autor_id, u.nome_usuario, u.nome_exibicao,
 	       m.conteudo, m.responde_a, m.menciona_todos, m.editada_em, m.fixada_em, m.criada_em,
 	       r.autor_id, COALESCE(ru.nome_exibicao, ''), COALESCE(left(r.conteudo, 120), '')
 	FROM mensagens m
@@ -234,6 +244,13 @@ func (s *Servico) completar(ctx context.Context, lista []Mensagem) error {
 	}
 	linhas.Close()
 
+	if err := s.completarEnquetes(ctx, lista, ids, pos); err != nil {
+		return err
+	}
+	if err := s.completarFios(ctx, lista, ids, pos); err != nil {
+		return err
+	}
+
 	linhas, err = s.db.QueryContext(ctx, `
 		SELECT mensagem_id, id, nome, tipo, tamanho FROM anexos WHERE mensagem_id = ANY($1) ORDER BY id`, pq.Array(ids))
 	if err != nil {
@@ -297,10 +314,11 @@ func (s *Servico) Listar(w http.ResponseWriter, r *http.Request) error {
 // ---- enviar ----
 
 type pedidoMensagem struct {
-	Conteudo  string  `json:"conteudo"`
-	RespondeA *int64  `json:"respondeA"`
-	Anexos    []int64 `json:"anexos"`
-	Nonce     string  `json:"nonce"` // o navegador usa para trocar a mensagem "enviando" pela real
+	Conteudo  string         `json:"conteudo"`
+	RespondeA *int64         `json:"respondeA"`
+	Anexos    []int64        `json:"anexos"`
+	Enquete   *pedidoEnquete `json:"enquete"`
+	Nonce     string         `json:"nonce"` // o navegador usa para trocar a mensagem "enviando" pela real
 }
 
 func (s *Servico) Enviar(w http.ResponseWriter, r *http.Request) error {
@@ -320,8 +338,13 @@ func (s *Servico) Enviar(w http.ResponseWriter, r *http.Request) error {
 	if utf8.RuneCountInString(p.Conteudo) > tamanhoMaximo {
 		return api.NovoErro(http.StatusBadRequest, "A mensagem pode ter até 4000 caracteres.")
 	}
-	if p.Conteudo == "" && len(p.Anexos) == 0 {
+	if p.Conteudo == "" && len(p.Anexos) == 0 && p.Enquete == nil {
 		return api.NovoErro(http.StatusBadRequest, "A mensagem está vazia.")
+	}
+	if p.Enquete != nil {
+		if err := p.Enquete.validar(); err != nil {
+			return err
+		}
 	}
 	if len(p.Anexos) > maxAnexosPorMsg {
 		return api.NovoErro(http.StatusBadRequest, "Até 10 anexos por mensagem.")
@@ -360,8 +383,8 @@ func (s *Servico) Enviar(w http.ResponseWriter, r *http.Request) error {
 		if len(p.Anexos) > 0 {
 			res, err := tx.ExecContext(r.Context(), `
 				UPDATE anexos SET mensagem_id = $1
-				WHERE id = ANY($2) AND enviado_por = $3 AND servidor_id = $4 AND mensagem_id IS NULL`,
-				id, pq.Array(p.Anexos), eu, c.ServidorID)
+				WHERE id = ANY($2) AND enviado_por = $3 AND servidor_id IS NOT DISTINCT FROM $4 AND mensagem_id IS NULL`,
+				id, pq.Array(p.Anexos), eu, nulo(c.ServidorID))
 			if err != nil {
 				return err
 			}
@@ -369,10 +392,18 @@ func (s *Servico) Enviar(w http.ResponseWriter, r *http.Request) error {
 				return api.NovoErro(http.StatusBadRequest, "Algum anexo não foi encontrado (envie de novo).")
 			}
 		}
-		return s.gravarMencoes(r.Context(), tx, id, c.ServidorID, mencoes, perm)
+		if p.Enquete != nil {
+			if err := s.gravarEnquete(r.Context(), tx, id, p.Enquete); err != nil {
+				return err
+			}
+		}
+		return s.gravarMencoes(r.Context(), tx, id, c.ServidorID, canalID, mencoes, perm)
 	})
 	if err != nil {
 		return err
+	}
+	if c.EhDireto() {
+		s.reabrirConversa(r.Context(), canalID)
 	}
 	// A pessoa leu o canal até a própria mensagem.
 	s.marcarLido(r.Context(), eu, canalID, id)
@@ -386,12 +417,27 @@ func (s *Servico) Enviar(w http.ResponseWriter, r *http.Request) error {
 		Nonce string `json:"nonce,omitempty"`
 	}{m, limitarTexto(p.Nonce, 40)}
 	s.publicar(r.Context(), eventoDoCanal(eventos.MensagemCriada, c.ServidorID, canalID, saida))
+	if c.Canais[canalID] == "fio" {
+		if f, err := s.umFio(r.Context(), canalID); err == nil {
+			s.avisarFio(r.Context(), c.ServidorID, f)
+		}
+	}
 	api.Responder(w, http.StatusCreated, saida)
 	return nil
 }
 
 // gravarMencoes guarda quem foi mencionado (pessoas do servidor e membros de cargos mencionáveis).
-func (s *Servico) gravarMencoes(ctx context.Context, tx *sql.Tx, mensagemID, servidorID int64, m Mencoes, perm permissoes.Permissao) error {
+func (s *Servico) gravarMencoes(ctx context.Context, tx *sql.Tx, mensagemID, servidorID, canalID int64, m Mencoes, perm permissoes.Permissao) error {
+	if servidorID == 0 { // conversa direta: só quem participa pode ser mencionado
+		if len(m.Usuarios) == 0 {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO mencoes (mensagem_id, usuario_id)
+			SELECT $1, usuario_id FROM conversa_membros WHERE canal_id = $2 AND usuario_id = ANY($3)
+			ON CONFLICT DO NOTHING`, mensagemID, canalID, pq.Array(m.Usuarios))
+		return err
+	}
 	if len(m.Usuarios) > 0 {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO mencoes (mensagem_id, usuario_id)
@@ -480,7 +526,7 @@ func (s *Servico) Editar(w http.ResponseWriter, r *http.Request) error {
 	if utf8.RuneCountInString(p.Conteudo) > tamanhoMaximo {
 		return api.NovoErro(http.StatusBadRequest, "A mensagem pode ter até 4000 caracteres.")
 	}
-	if p.Conteudo == "" && len(m.Anexos) == 0 {
+	if p.Conteudo == "" && len(m.Anexos) == 0 && m.Enquete == nil {
 		return api.NovoErro(http.StatusBadRequest, "A mensagem não pode ficar vazia. Apague, se quiser.")
 	}
 	perm := c.NoCanal(canalID)
@@ -494,7 +540,7 @@ func (s *Servico) Editar(w http.ResponseWriter, r *http.Request) error {
 		if _, err := tx.ExecContext(r.Context(), `DELETE FROM mencoes WHERE mensagem_id = $1`, m.ID); err != nil {
 			return err
 		}
-		return s.gravarMencoes(r.Context(), tx, m.ID, c.ServidorID, mencoes, perm)
+		return s.gravarMencoes(r.Context(), tx, m.ID, c.ServidorID, canalID, mencoes, perm)
 	})
 	if err != nil {
 		return err
@@ -550,6 +596,11 @@ func (s *Servico) Apagar(w http.ResponseWriter, r *http.Request) error {
 			"de "+nomeAutor(m)+": "+limitarTexto(m.Conteudo, 200))
 	}
 	s.publicar(r.Context(), eventoDoCanal(eventos.MensagemApagada, c.ServidorID, canalID, map[string]int64{"id": m.ID, "canalId": canalID}))
+	if c.Canais[canalID] == "fio" {
+		if f, err := s.umFio(r.Context(), canalID); err == nil {
+			s.avisarFio(r.Context(), c.ServidorID, f)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -583,7 +634,16 @@ func (s *Servico) reacao(w http.ResponseWriter, r *http.Request, adicionar bool)
 	}
 	emoji := strings.TrimSpace(r.PathValue("emoji"))
 	if emoji == "" || utf8.RuneCountInString(emoji) > 8 || len(emoji) > 32 {
-		return api.NovoErro(http.StatusBadRequest, "Emoji inválido.")
+		if !emojiProprio.MatchString(emoji) {
+			return api.NovoErro(http.StatusBadRequest, "Emoji inválido.")
+		}
+	}
+	if emojiProprio.MatchString(emoji) && adicionar {
+		var existe bool
+		_ = s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM emojis WHERE id = $1)`, emoji[2:]).Scan(&existe)
+		if !existe {
+			return api.NovoErro(http.StatusBadRequest, "Esse emoji não existe mais.")
+		}
 	}
 	eu := c.Membro.UsuarioID
 	tipo := eventos.ReacaoRemovida

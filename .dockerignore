@@ -6,3 +6,5 @@
 *.md
 docker-compose.yml
 Caddyfile
+
+desktop

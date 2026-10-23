@@ -1,0 +1,7 @@
+rnnoise.wasm — RNNoise (https://github.com/xiph/rnnoise), Copyright (c) 2017 Xiph.Org Foundation,
+Mozilla Corporation e Jean-Marc Valin. Licença BSD de 3 cláusulas.
+
+Compilado para WebAssembly pela Jitsi (https://github.com/jitsi/rnnoise-wasm, versão 0.2.1),
+sob a Licença Apache 2.0.
+
+rnnoise-worklet.js foi escrito para o Prosa (licença MIT do projeto).

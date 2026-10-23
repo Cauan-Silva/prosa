@@ -8,6 +8,9 @@ import { verificarVersao } from './versao.js'
 
 const Contexto = createContext(null)
 
+/** Fio aberto no painel lateral (sem som de mensagem nova para ele). */
+export const painelFio = { id: null }
+
 const inicial = {
   conexao: 'conectando', // conectando | online | reconectando
   pronto: false,
@@ -17,8 +20,25 @@ const inicial = {
   membros: {}, // servidorId -> [membro]
   mensagens: {}, // canalId -> { lista, inicio (não há mais antigas), carregando }
   digitando: {}, // canalId -> { usuarioId: { nome, ate } }
-  voz: {}, // reservado para a etapa da voz
+  voz: {}, // servidorId -> { canalId: [participantes] }
+  // mensagens diretas e amigos (não pertencem a nenhum servidor)
+  conversas: null, // [conversa] (null = ainda não carregou)
+  amigos: null, // { amigos, recebidos, enviados, bloqueados }
 }
+
+/** Uma conversa direta vista como um canal de texto (para reaproveitar a tela de mensagens). */
+export function canalDaConversa(c, eu) {
+  const outros = c.participantes.filter((p) => p.id !== eu)
+  const nome = c.tipo === 'dm' ? outros[0]?.nomeExibicao || 'Conversa' : c.nome || outros.map((p) => p.nomeExibicao).join(', ') || 'Grupo vazio'
+  return { ...c, tipoConversa: c.tipo, tipo: 'texto', nome, topico: '', outros }
+}
+
+/** Participantes no formato de membro (nome, foto, status) para menções e mensagens. */
+export const membrosDaConversa = (c) =>
+  c.participantes.map((p) => ({
+    usuarioId: p.id, nomeUsuario: p.nomeUsuario, nomeExibicao: p.nomeExibicao, avatar: p.avatar,
+    status: p.status, statusTexto: p.statusTexto, statusEmoji: p.statusEmoji, cargos: [],
+  }))
 
 const porId = (lista) => Object.fromEntries(lista.map((x) => [x.id, x]))
 
@@ -33,6 +53,11 @@ function comCanal(estado, canalId, fn) {
 }
 
 function alterarCanalDaVisao(estado, servidorId, canalId, fn) {
+  if (!servidorId) {
+    // conversa direta
+    if (!estado.conversas?.some((c) => c.id === canalId)) return estado
+    return { ...estado, conversas: estado.conversas.map((c) => (c.id === canalId ? fn(c) : c)) }
+  }
   const v = estado.servidores[servidorId]
   if (!v) return estado
   return {
@@ -70,6 +95,21 @@ function reducer(estado, a) {
     case 'eu':
       return { ...estado, eu: { ...estado.eu, ...a.usuario } }
 
+    case 'conversas':
+      // o servidor conta as não lidas; depois o navegador soma as que chegam
+      return { ...estado, conversas: a.lista.map((c) => ({ ...c, mencoesNaoLidas: c.naoLidas })) }
+
+    case 'conversa': // uma conversa nova ou atualizada (ao abrir uma DM)
+      return {
+        ...estado,
+        conversas: [{ ...a.conversa, mencoesNaoLidas: a.conversa.naoLidas }, ...(estado.conversas || []).filter((c) => c.id !== a.conversa.id)],
+      }
+
+    case 'amigos': {
+      const online = Object.fromEntries(a.lista.amigos.filter((p) => p.online).map((p) => [p.id, true]))
+      return { ...estado, amigos: a.lista, online: { ...estado.online, 0: online } }
+    }
+
     case 'USUARIO_ALTERADO': {
       const d = a.d
       const campos = {
@@ -84,7 +124,12 @@ function reducer(estado, a) {
       }
       // a própria pessoa (em outra aba) recebe o status real, inclusive "invisível"
       const eu = d.usuarioId === estado.eu?.id && !a.s ? { ...estado.eu, ...d, status: estado.eu.status } : estado.eu
-      return { ...estado, membros, eu }
+      const pessoa = (p) => (p.id === d.usuarioId ? { ...p, ...campos } : p)
+      const conversas = estado.conversas?.map((c) =>
+        c.participantes.some((p) => p.id === d.usuarioId) ? { ...c, participantes: c.participantes.map(pessoa) } : c,
+      )
+      const amigos = estado.amigos && Object.fromEntries(Object.entries(estado.amigos).map(([k, l]) => [k, l.map(pessoa)]))
+      return { ...estado, membros, eu, conversas, amigos }
     }
 
     case 'SERVIDOR_CRIADO': {
@@ -178,7 +223,25 @@ function reducer(estado, a) {
         ...c,
         ultimaMensagemId: Math.max(c.ultimaMensagemId || 0, m.id),
         ultimaLida: minha ? Math.max(c.ultimaLida || 0, m.id) : c.ultimaLida,
-        mencoesNaoLidas: !minha && (m.mencoes?.includes(estado.eu?.id) || m.mencionaTodos) ? (c.mencoesNaoLidas || 0) + 1 : c.mencoesNaoLidas,
+        // numa conversa direta, toda mensagem nova conta no selo (como uma menção)
+        mencoesNaoLidas: !minha && (!a.s || m.mencoes?.includes(estado.eu?.id) || m.mencionaTodos) ? (c.mencoesNaoLidas || 0) + 1 : c.mencoesNaoLidas,
+      }))
+    }
+
+    case 'FIO_ATUALIZADO': {
+      // o resumo do fio fica na mensagem de origem, no canal pai (a.c)
+      const f = a.d
+      if (!f.mensagemId) return estado
+      return comCanal(estado, a.c, (c) => ({
+        ...c,
+        lista: c.lista.map((m) => {
+          if (m.id !== f.mensagemId) return m
+          if (f.apagado) {
+            const { fio: _, ...resto } = m
+            return resto
+          }
+          return { ...m, fio: f }
+        }),
       }))
     }
 
@@ -250,8 +313,23 @@ function reducer(estado, a) {
 const estruturais = new Set([
   'SERVIDOR_ALTERADO', 'CANAL_CRIADO', 'CANAL_ALTERADO', 'CANAL_APAGADO', 'CATEGORIA_CRIADA',
   'CATEGORIA_ALTERADA', 'CATEGORIA_APAGADA', 'CARGO_CRIADO', 'CARGO_ALTERADO', 'CARGO_APAGADO',
-  'PERMISSOES_ALTERADAS',
+  'PERMISSOES_ALTERADAS', 'EMOJIS_ALTERADOS',
 ])
+
+/** Todos os emojis dos servidores da pessoa (o do servidor aberto primeiro). */
+export function emojisDisponiveis(estado, servidorId) {
+  const lista = []
+  const vistos = new Set()
+  const visoes = Object.values(estado.servidores).sort((a, b) => (b.servidor.id === servidorId) - (a.servidor.id === servidorId))
+  for (const v of visoes) {
+    for (const e of v.emojis || []) {
+      if (vistos.has(e.id)) continue
+      vistos.add(e.id)
+      lista.push({ ...e, servidor: v.servidor.nome, servidorId: v.servidor.id })
+    }
+  }
+  return lista
+}
 
 export function EstadoProvider({ children }) {
   const [estado, despachar] = useReducer(reducer, inicial)
@@ -259,6 +337,21 @@ export function EstadoProvider({ children }) {
   estadoRef.current = estado
   const wsRef = useRef(null)
   const ouvintes = useRef(new Set())
+
+  // Amigos e conversas diretas (agrupa eventos seguidos numa consulta só).
+  const esperas = useRef({})
+  const depois = useCallback((chave, fn) => {
+    clearTimeout(esperas.current[chave])
+    esperas.current[chave] = setTimeout(fn, 150)
+  }, [])
+  const carregarAmigos = useCallback(
+    () => depois('amigos', () => api.amigos().then((lista) => despachar({ tipo: 'amigos', lista })).catch(() => {})),
+    [depois],
+  )
+  const carregarConversas = useCallback(
+    () => depois('conversas', () => api.conversas().then((lista) => despachar({ tipo: 'conversas', lista })).catch(() => {})),
+    [depois],
+  )
 
   // Recarrega a visão de um servidor (agrupa vários eventos seguidos numa consulta só).
   const recargas = useRef({})
@@ -292,10 +385,12 @@ export function EstadoProvider({ children }) {
         } catch {
           return
         }
-        const acao = { tipo: e.t, s: e.s, c: e.c, u: e.u, d: e.d }
+        const acao = { tipo: e.t, s: e.s || 0, c: e.c, u: e.u, d: e.d }
         if (e.t === 'PRONTO') {
           despachar(acao)
           carregarDaConta(e.d.usuario?.preferencias)
+          carregarAmigos()
+          carregarConversas()
           // reconectou (muitas vezes porque o servidor foi atualizado): confere se o site mudou
           setTimeout(verificarVersao, 3000)
           // Depois de reconectar, busca o que chegou nos canais abertos enquanto estava fora.
@@ -305,7 +400,13 @@ export function EstadoProvider({ children }) {
           }
         } else if (estruturais.has(e.t)) {
           recarregar(e.s)
+        } else if (e.t === 'AMIGO_ALTERADO') {
+          carregarAmigos()
+        } else if (e.t === 'CONVERSA_ALTERADA') {
+          carregarConversas()
         } else {
+          // mensagem numa conversa que ainda não está na lista (DM nova ou que estava fechada)
+          if (e.t === 'MENSAGEM_CRIADA' && !e.s && !estadoRef.current.conversas?.some((c) => c.id === e.c)) carregarConversas()
           if (e.t === 'MEMBRO_ALTERADO' && e.d?.usuarioId === estadoRef.current.eu?.id) recarregar(e.s)
           despachar(acao)
         }
@@ -330,7 +431,7 @@ export function EstadoProvider({ children }) {
       clearInterval(limpar)
       wsRef.current?.close()
     }
-  }, [recarregar])
+  }, [recarregar, carregarAmigos, carregarConversas])
 
   const mandar = useCallback((t, d) => {
     const ws = wsRef.current
@@ -342,7 +443,10 @@ export function EstadoProvider({ children }) {
     return () => ouvintes.current.delete(f)
   }, [])
 
-  const valor = useMemo(() => ({ estado, despachar, mandar, ouvir, recarregar }), [estado, mandar, ouvir, recarregar])
+  const valor = useMemo(
+    () => ({ estado, despachar, mandar, ouvir, recarregar, carregarAmigos, carregarConversas }),
+    [estado, mandar, ouvir, recarregar, carregarAmigos, carregarConversas],
+  )
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>
 }
 
@@ -355,10 +459,13 @@ function sonsDoEvento(e, estado) {
     const m = e.d
     // status "não perturbe": sem sons nem notificações de mensagem
     if (!m?.autor || m.autor.id === eu || estado.eu?.status === 'ocupado') return
-    const mencao = m.mencoes?.includes(eu) || m.mencionaTodos
+    // numa conversa direta toda mensagem conta como menção (é para você)
+    const mencao = m.mencoes?.includes(eu) || m.mencionaTodos || !e.s
     notificar(e, m, mencao, estado)
+    const canalAberto = Number(location.pathname.match(/^\/(?:s\/\d+|d)\/(\d+)/)?.[1])
+    if (!e.s && !document.hidden && canalAberto === e.c) return
+    if (!document.hidden && painelFio.id === e.c) return
     if (mencao) return tocar('mencao')
-    const canalAberto = Number(location.pathname.match(/^\/s\/\d+\/(\d+)/)?.[1])
     if (document.hidden || canalAberto !== e.c) tocar('mensagem')
   } else if (e.t === 'VOZ_ESTADO' && e.d?.canalId === salaDeVoz.canalId) {
     const antes = new Set((estado.voz[e.s]?.[e.d.canalId] || []).map((p) => p.usuarioId))
@@ -391,15 +498,17 @@ function notificar(e, m, mencao, estado) {
   const v = estado.servidores[e.s]
   const canal = v?.canais.find((c) => c.id === e.c)
   const membro = estado.membros[e.s]?.find((x) => x.usuarioId === m.autor.id)
+  const grupo = !e.s && estado.conversas?.find((c) => c.id === e.c && c.tipo === 'grupo')
+  const onde = canal ? ` em #${canal.nome}` : grupo ? ` em ${grupo.nome || 'grupo'}` : ''
   try {
-    const n = new Notification(`${membro?.apelido || m.autor.nomeExibicao}${canal ? ` em #${canal.nome}` : ''}`, {
+    const n = new Notification(`${membro?.apelido || m.autor.nomeExibicao}${onde}`, {
       body: (m.conteudo || 'Enviou um anexo').replace(/<@&?\d+>/g, '@…').slice(0, 180),
       icon: membro?.avatar || '/icone-192.png',
       tag: `canal-${e.c}`,
     })
     n.onclick = () => {
       window.focus()
-      history.pushState(null, '', `/s/${e.s}/${e.c}`)
+      history.pushState(null, '', e.s ? `/s/${e.s}/${e.c}` : `/d/${e.c}`)
       window.dispatchEvent(new Event('rota'))
       n.close()
     }

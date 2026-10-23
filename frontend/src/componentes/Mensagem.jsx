@@ -2,7 +2,10 @@ import { memo, useEffect, useRef, useState } from 'react'
 import Icone from './Icone.jsx'
 import { Avatar } from './Azulejo.jsx'
 import Previa from './Previa.jsx'
-import { Texto, linksComPrevia } from '../servicos/texto.jsx'
+import SeletorEmoji from './SeletorEmoji.jsx'
+import { CartaoEnquete } from './Enquete.jsx'
+import { ResumoFio } from './Fios.jsx'
+import { Texto, linksComPrevia, urlEmoji } from '../servicos/texto.jsx'
 import { corDe, nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api, enderecoAnexo } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
@@ -15,6 +18,16 @@ export const abrirPerfil = (usuarioId) => window.dispatchEvent(new CustomEvent('
 export const RAPIDOS = ['👍', '❤️', '😂', '😮', '🎉', '🙏', '👀', '🔥']
 
 /** Rola até uma mensagem (se ela estiver carregada) e pisca um destaque nela. */
+/** Uma reação: emoji do sistema, ou de servidor ("c:" + id), que vira imagem. */
+export function EmojiReacao({ emoji, nomes }) {
+  if (emoji.startsWith('c:')) {
+    const id = emoji.slice(2)
+    const nome = nomes?.[id]
+    return <img className="emoji-reacao" src={urlEmoji(id)} alt={nome ? `:${nome}:` : 'emoji'} title={nome ? `:${nome}:` : undefined} />
+  }
+  return <span>{emoji}</span>
+}
+
 export function irParaMensagem(id) {
   const el = document.getElementById(`m${id}`)
   if (!el) return false
@@ -26,7 +39,7 @@ export function irParaMensagem(id) {
   return true
 }
 
-function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoResponder }) {
+function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoResponder, aoAbrirFio }) {
   const { estado, despachar } = useEstado()
   const [seletor, setSeletor] = useState(false)
   const eu = estado.eu
@@ -36,6 +49,9 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
   const nome = m.autor ? nomeDe(membro || m.autor) : 'Conta apagada'
   const cor = corDe(membro, visao.cargos)
   const mencionaMe = m.mencoes?.includes(eu.id) || m.mencionaTodos
+  const nomesEmoji = m.reacoes?.some((r) => r.emoji.startsWith('c:'))
+    ? Object.fromEntries(Object.values(estado.servidores).flatMap((v) => (v.emojis || []).map((e) => [String(e.id), e.nome])))
+    : null
 
   async function reagir(emoji) {
     setSeletor(false)
@@ -47,6 +63,14 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
         tocar('reacao')
         await api.reagir(canal.id, m.id, emoji)
       }
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
+  async function criarFio() {
+    try {
+      aoAbrirFio(await api.criarFio(canal.id, m.id))
     } catch (e) {
       alert(e.message)
     }
@@ -134,7 +158,9 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
               </div>
             )
           )}
+          {m.enquete && <CartaoEnquete m={m} canal={canal} eu={eu.id} />}
           {!editando && links.map((url) => <Previa key={url} url={url} />)}
+          {m.fio && aoAbrirFio && <ResumoFio fio={m.fio} aoAbrir={() => aoAbrirFio(m.fio)} />}
           {m.anexos?.length > 0 && (
             <div className="anexos">
               {m.anexos.map((a) => (
@@ -165,7 +191,7 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
                     aria-pressed={minhaReacao}
                     title={`${quem}${r.usuarios.length > 5 ? ` e mais ${r.usuarios.length - 5}` : ''}`}
                   >
-                    <span>{r.emoji}</span> {r.usuarios.length}
+                    <EmojiReacao emoji={r.emoji} nomes={nomesEmoji} /> {r.usuarios.length}
                   </button>
                 )
               })}
@@ -184,6 +210,11 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
           {tem(perm, P.EnviarMensagens) && (
             <button className="icone-botao" onClick={() => aoResponder(m)} aria-label="Responder" title="Responder">
               <Icone nome="responder" tamanho={18} />
+            </button>
+          )}
+          {aoAbrirFio && !m.fio && tem(perm, P.EnviarMensagens) && (
+            <button className="icone-botao" onClick={criarFio} aria-label="Criar fio" title="Criar fio (conversa paralela)">
+              <Icone nome="fio" tamanho={18} />
             </button>
           )}
           {tem(perm, P.GerenciarMensagens) && (
@@ -206,7 +237,7 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
               <Icone nome="lixo" tamanho={18} />
             </button>
           )}
-          {seletor && <Seletor aoEscolher={reagir} aoFechar={() => setSeletor(false)} />}
+          {seletor && <Seletor servidorId={visao.servidor.id} aoEscolher={reagir} aoFechar={() => setSeletor(false)} />}
         </div>
       )}
     </article>
@@ -215,14 +246,25 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
 
 export default memo(Mensagem)
 
-function Seletor({ aoEscolher, aoFechar }) {
+function Seletor({ servidorId, aoEscolher, aoFechar }) {
   const ref = useRef(null)
-  const [outro, setOutro] = useState('')
+  const [mais, setMais] = useState(false)
   useEffect(() => {
+    if (mais) return
     const fora = (e) => !ref.current?.contains(e.target) && aoFechar()
     document.addEventListener('pointerdown', fora)
     return () => document.removeEventListener('pointerdown', fora)
-  }, [aoFechar])
+  }, [aoFechar, mais])
+  if (mais) {
+    return (
+      <SeletorEmoji
+        classe="seletor-reacao"
+        servidorId={servidorId}
+        aoFechar={aoFechar}
+        aoEscolher={({ texto, emoji }) => aoEscolher(texto || `c:${emoji.id}`)}
+      />
+    )
+  }
   return (
     <div className="seletor-emoji" ref={ref}>
       {RAPIDOS.map((e) => (
@@ -230,15 +272,9 @@ function Seletor({ aoEscolher, aoFechar }) {
           {e}
         </button>
       ))}
-      <form
-        onSubmit={(ev) => {
-          ev.preventDefault()
-          const e = outro.trim()
-          if (e) aoEscolher([...e].slice(0, 2).join(''))
-        }}
-      >
-        <input value={outro} onChange={(e) => setOutro(e.target.value)} placeholder="outro" aria-label="Outro emoji" maxLength={8} />
-      </form>
+      <button className="seletor-mais" onClick={() => setMais(true)} aria-label="Mais emojis" title="Mais emojis (inclui os do servidor)">
+        <Icone nome="mais" tamanho={18} />
+      </button>
     </div>
   )
 }

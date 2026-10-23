@@ -128,7 +128,7 @@ func (s *Servico) canalDaRota(r *http.Request, servidorID int64) (Canal, error) 
 		return Canal{}, err
 	}
 	canal, err := lerCanal(s.db.QueryRowContext(r.Context(),
-		`SELECT `+colunasCanal+` FROM canais WHERE id = $1 AND servidor_id = $2`, canalID, servidorID))
+		`SELECT `+colunasCanal+` FROM canais WHERE id = $1 AND servidor_id = $2 AND tipo <> 'fio'`, canalID, servidorID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return canal, api.NovoErro(http.StatusNotFound, "Canal não encontrado.")
 	}

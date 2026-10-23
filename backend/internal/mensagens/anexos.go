@@ -83,7 +83,11 @@ func (s *Servico) EnviarAnexo(w http.ResponseWriter, r *http.Request) error {
 
 	aleatorio := make([]byte, 12)
 	_, _ = rand.Read(aleatorio)
-	chave := "anexos/" + strconv.FormatInt(c.ServidorID, 10) + "/" + hex.EncodeToString(aleatorio)
+	pasta := strconv.FormatInt(c.ServidorID, 10)
+	if c.EhDireto() {
+		pasta = "d" + strconv.FormatInt(canalID, 10) // conversas diretas
+	}
+	chave := "anexos/" + pasta + "/" + hex.EncodeToString(aleatorio)
 	if err := s.armazem.Gravar(r.Context(), chave, arquivo, cabecalho.Size, tipo); err != nil {
 		slog.Error("não foi possível guardar o anexo", "erro", err)
 		return api.NovoErro(http.StatusBadGateway, "Não foi possível guardar o arquivo agora. Tente de novo.")
@@ -91,7 +95,7 @@ func (s *Servico) EnviarAnexo(w http.ResponseWriter, r *http.Request) error {
 	a := Anexo{Nome: nome, Tipo: tipo, Tamanho: cabecalho.Size}
 	if err := s.db.QueryRowContext(r.Context(), `
 		INSERT INTO anexos (enviado_por, servidor_id, nome, tipo, tamanho, chave) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		c.Membro.UsuarioID, c.ServidorID, nome, tipo, cabecalho.Size, chave).Scan(&a.ID); err != nil {
+		c.Membro.UsuarioID, nulo(c.ServidorID), nome, tipo, cabecalho.Size, chave).Scan(&a.ID); err != nil {
 		return err
 	}
 	a.Endereco = enderecoAnexo(a.ID, nome)
@@ -107,12 +111,14 @@ func (s *Servico) BaixarAnexo(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var nome, tipo, chave string
-	var servidorID, enviadoPor int64
-	var canalID sql.NullInt64
+	var enviadoPor int64
+	var servidorID, canalID sql.NullInt64
+	var tipoCanal sql.NullString
 	err = s.db.QueryRowContext(r.Context(), `
-		SELECT a.nome, a.tipo, a.chave, a.servidor_id, a.enviado_por, m.canal_id
-		FROM anexos a LEFT JOIN mensagens m ON m.id = a.mensagem_id WHERE a.id = $1`, id).
-		Scan(&nome, &tipo, &chave, &servidorID, &enviadoPor, &canalID)
+		SELECT a.nome, a.tipo, a.chave, a.servidor_id, a.enviado_por, m.canal_id, c.tipo
+		FROM anexos a LEFT JOIN mensagens m ON m.id = a.mensagem_id LEFT JOIN canais c ON c.id = m.canal_id
+		WHERE a.id = $1`, id).
+		Scan(&nome, &tipo, &chave, &servidorID, &enviadoPor, &canalID, &tipoCanal)
 	naoAchou := api.NovoErro(http.StatusNotFound, "Arquivo não encontrado.")
 	if errors.Is(err, sql.ErrNoRows) {
 		return naoAchou
@@ -121,8 +127,13 @@ func (s *Servico) BaixarAnexo(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	eu := api.Quem(r).UsuarioID
-	if canalID.Valid {
-		c, err := acesso.Carregar(r.Context(), s.db, servidorID, eu)
+	if canalID.Valid && !servidorID.Valid {
+		c, err := s.contextoDireto(r.Context(), canalID.Int64, eu, tipoCanal.String)
+		if err != nil || !c.NoCanal(canalID.Int64).Tem(permissoes.LerHistorico) {
+			return naoAchou
+		}
+	} else if canalID.Valid {
+		c, err := acesso.Carregar(r.Context(), s.db, servidorID.Int64, eu)
 		if err != nil || !c.NoCanal(canalID.Int64).Tem(permissoes.LerHistorico) {
 			return naoAchou
 		}

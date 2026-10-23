@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Azulejo } from '../componentes/Azulejo.jsx'
 import Canais from '../componentes/Canais.jsx'
 import Conversa from '../componentes/Conversa.jsx'
@@ -10,6 +10,7 @@ import Convidar from '../componentes/Convidar.jsx'
 import Configuracoes from '../componentes/Configuracoes.jsx'
 import CartaoMembro from '../componentes/CartaoMembro.jsx'
 import AceitarConvite from '../componentes/AceitarConvite.jsx'
+import { Amigos, BarraDiretas, ConversaDireta } from '../componentes/Diretas.jsx'
 import Icone from '../componentes/Icone.jsx'
 import { useEstado } from '../servicos/estado.jsx'
 import { navegar } from '../servicos/rota.jsx'
@@ -22,6 +23,21 @@ function lerUltimos() {
     return JSON.parse(localStorage.getItem(CHAVE_CANAIS)) || {}
   } catch {
     return {}
+  }
+}
+const CHAVE_LUGAR = 'prosa.ultimoLugar'
+function lerLugar() {
+  try {
+    return localStorage.getItem(CHAVE_LUGAR) || ''
+  } catch {
+    return ''
+  }
+}
+function guardarLugar(caminho) {
+  try {
+    localStorage.setItem(CHAVE_LUGAR, caminho)
+  } catch {
+    // sem armazenamento
   }
 }
 function guardarUltimo(servidor, canal) {
@@ -50,11 +66,27 @@ export default function Aplicativo({ caminho }) {
   const servidorId = Number(sid) || null
   const canalId = Number(cid) || null
   const convite = caminho.match(/^\/convite\/([\w-]+)/)?.[1]
+  const conversaId = Number(caminho.match(/^\/d\/(\d+)/)?.[1]) || null
+  const inicio = !servidorId // página inicial: amigos e mensagens diretas
+  const conversa = conversaId ? estado.conversas?.find((c) => c.id === conversaId) : null
   const visao = servidorId ? estado.servidores[servidorId] : null
   const ordem = useMemo(
     () => Object.values(estado.servidores).sort((a, b) => a.servidor.id - b.servidor.id),
     [estado.servidores],
   )
+
+  // Ao abrir o Prosa no início, volta para onde a pessoa estava (servidor ou conversa).
+  const abriu = useRef(false)
+  useEffect(() => {
+    if (!estado.pronto || abriu.current) return
+    abriu.current = true
+    const lugar = lerLugar()
+    const sv = Number(lugar.match(/^\/s\/(\d+)/)?.[1])
+    if (caminho === '/' && (lugar.startsWith('/d/') || (sv && estado.servidores[sv]))) navegar(lugar, { substituir: true })
+  }, [estado.pronto, caminho, estado.servidores])
+  useEffect(() => {
+    if (/^\/(s|d)\/\d+/.test(caminho) || caminho === '/') guardarLugar(caminho)
+  }, [caminho])
 
   // Escolhe para onde ir quando o endereço não diz (ou aponta para algo que sumiu).
   useEffect(() => {
@@ -64,10 +96,8 @@ export default function Aplicativo({ caminho }) {
       return
     }
     if (!servidorId) {
-      if (caminho === '/' && ordem.length) {
-        const primeiro = ordem[0].servidor.id
-        navegar(`/s/${primeiro}`, { substituir: true })
-      }
+      // conversa que não existe (ou de que a pessoa saiu): volta para os amigos
+      if (conversaId && estado.conversas && !conversa) navegar('/', { substituir: true })
       return
     }
     const textos = visao.canais.filter((c) => c.tipo === 'texto')
@@ -76,7 +106,7 @@ export default function Aplicativo({ caminho }) {
       const destino = textos.find((c) => c.id === ultimo) || textos[0]
       if (destino) navegar(`/s/${servidorId}/${destino.id}`, { substituir: true })
     }
-  }, [estado.pronto, servidorId, canalId, visao, ordem, caminho, convite])
+  }, [estado.pronto, servidorId, canalId, visao, ordem, caminho, convite, conversaId, conversa, estado.conversas])
 
   useEffect(() => {
     if (servidorId && canalId) guardarUltimo(servidorId, canalId)
@@ -89,14 +119,16 @@ export default function Aplicativo({ caminho }) {
   }, [servidorId, visao, estado.membros, despachar])
 
   // Título da aba com não lidas
-  const naoLidos = ordem.reduce(
-    (t, v) => t + v.canais.filter((c) => c.tipo === 'texto' && (c.ultimaMensagemId || 0) > (c.ultimaLida || 0)).length,
-    0,
-  )
+  const diretasNaoLidas = (estado.conversas || []).reduce((t, c) => t + (c.mencoesNaoLidas || 0), 0)
+  const pedidos = estado.amigos?.recebidos.length || 0
+  const naoLidos =
+    ordem.reduce((t, v) => t + v.canais.filter((c) => c.tipo === 'texto' && (c.ultimaMensagemId || 0) > (c.ultimaLida || 0)).length, 0) +
+    (estado.conversas || []).filter((c) => (c.ultimaMensagemId || 0) > (c.ultimaLida || 0)).length
   useEffect(() => {
     const canal = visao?.canais.find((c) => c.id === canalId)
-    document.title = `${naoLidos ? `(${naoLidos}) ` : ''}${canal ? `#${canal.nome} · ` : ''}Prosa`
-  }, [naoLidos, visao, canalId])
+    const titulo = canal ? `#${canal.nome} · ` : inicio ? (conversaId ? 'Mensagens · ' : 'Amigos · ') : ''
+    document.title = `${naoLidos ? `(${naoLidos}) ` : ''}${titulo}Prosa`
+  }, [naoLidos, visao, canalId, inicio, conversaId])
 
   const canal = visao?.canais.find((c) => c.id === canalId)
   const abrir = (tipo, extra = {}) => setModal({ tipo, ...extra })
@@ -113,7 +145,7 @@ export default function Aplicativo({ caminho }) {
   }
 
   return (
-    <div className={`app painel-${visao ? painel : 'canais'} ${mostrarMembros && visao ? 'com-membros' : ''}`}>
+    <div className={`app painel-${visao || inicio ? painel : 'canais'} ${mostrarMembros && visao ? 'com-membros' : ''}`}>
       {estado.conexao !== 'online' ? (
         <div className="faixa-conexao" role="status">
           Sem conexão. Tentando reconectar…
@@ -128,8 +160,18 @@ export default function Aplicativo({ caminho }) {
       )}
 
       <nav className="trilho" aria-label="Servidores">
-        <button className="trilho-logo" onClick={() => navegar('/')} title="Prosa" aria-label="Prosa, início">
+        <button
+          className={`trilho-logo ${inicio ? 'ativo' : ''}`}
+          onClick={() => {
+            navegar('/')
+            setPainel('canais')
+          }}
+          title="Amigos e mensagens diretas"
+          aria-label={`Início: amigos e mensagens diretas${diretasNaoLidas ? `, ${diretasNaoLidas} mensagens novas` : ''}${pedidos ? `, ${pedidos} pedidos de amizade` : ''}`}
+          aria-current={inicio ? 'page' : undefined}
+        >
           <img src="/icone-64.png" alt="" width="48" height="48" />
+          {diretasNaoLidas + pedidos > 0 && <span className="selo">{diretasNaoLidas + pedidos > 99 ? '99+' : diretasNaoLidas + pedidos}</span>}
         </button>
         <span className="trilho-divisor" aria-hidden="true" />
         {ordem.map((v) => {
@@ -187,6 +229,26 @@ export default function Aplicativo({ caminho }) {
             </main>
           )}
           {mostrarMembros && <Membros visao={visao} aoAbrir={abrir} />}
+        </>
+      ) : inicio ? (
+        <>
+          <BarraDiretas
+            canalId={conversaId}
+            aoAbrir={abrir}
+            aoEscolher={(id) => {
+              navegar(id ? `/d/${id}` : '/')
+              setPainel('conversa')
+            }}
+          />
+          {conversa ? (
+            <ConversaDireta key={conversa.id} conversa={conversa} aoVoltar={() => setPainel('canais')} />
+          ) : conversaId ? (
+            <main className="conversa vazia">
+              <p>Abrindo a conversa…</p>
+            </main>
+          ) : (
+            <Amigos aoVoltar={() => setPainel('canais')} aoCriarServidor={() => abrir('novo')} semServidores={!ordem.length} />
+          )}
         </>
       ) : (
         <main className="boas-vindas">

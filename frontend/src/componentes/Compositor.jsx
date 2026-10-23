@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Icone from './Icone.jsx'
 import { Avatar } from './Azulejo.jsx'
-import { nomeDe, useEstado } from '../servicos/estado.jsx'
+import SeletorEmoji from './SeletorEmoji.jsx'
+import { CriarEnquete } from './Enquete.jsx'
+import { emojisDisponiveis, nomeDe, useEstado } from '../servicos/estado.jsx'
 import { api, enviarArquivo } from '../servicos/api.js'
 import { P, tem } from '../servicos/permissoes.js'
 import { prepararTexto } from '../servicos/texto.jsx'
@@ -16,7 +18,9 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
   const [texto, setTexto] = useState('')
   const [escolhidos, setEscolhidos] = useState([]) // menções escolhidas no autocompletar
   const [envios, setEnvios] = useState([]) // anexos: { chave, nome, tamanho, progresso, anexo, erro }
-  const [sugestao, setSugestao] = useState(null) // { inicio, busca, indice }
+  const [sugestao, setSugestao] = useState(null) // { tipo: mencao | emoji, inicio, busca, indice }
+  const [seletor, setSeletor] = useState(false)
+  const [enquete, setEnquete] = useState(false)
   const [arrastando, setArrastando] = useState(false)
   const [erro, setErro] = useState('')
   const campo = useRef(null)
@@ -48,6 +52,13 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
   const opcoes = useMemo(() => {
     if (!sugestao) return []
     const b = sugestao.busca.toLowerCase()
+    if (sugestao.tipo === 'emoji') {
+      return emojisDisponiveis(estado, visao.servidor.id)
+        .filter((e) => e.nome.toLowerCase().includes(b))
+        .sort((x, y) => x.nome.toLowerCase().startsWith(b) ? -1 : y.nome.toLowerCase().startsWith(b) ? 1 : 0)
+        .slice(0, 8)
+        .map((e) => ({ chave: `e${e.id}`, rotulo: e.nome, detalhe: e.servidor, codigo: `<${e.animado ? 'a' : ''}:${e.nome}:${e.id}>`, imagem: e.url, emoji: true }))
+    }
     const pessoas = (membros || [])
       .filter((m) => [m.apelido, m.nomeExibicao, m.nomeUsuario].some((n) => n?.toLowerCase().includes(b)))
       .slice(0, 8)
@@ -59,7 +70,7 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
       .map((c) => ({ chave: `c${c.id}`, rotulo: c.nome, detalhe: 'cargo', codigo: `<@&${c.id}>` }))
     const todos = podeTodos && 'todos'.includes(b) ? [{ chave: 'todos', rotulo: 'todos', detalhe: 'avisa todo mundo no canal', codigo: '@todos' }] : []
     return [...pessoas, ...cargos, ...todos]
-  }, [sugestao, membros, visao.cargos, perm])
+  }, [sugestao, membros, visao.cargos, visao.servidor.id, perm, estado])
 
   function aoMudar(e) {
     const valor = e.target.value
@@ -68,7 +79,12 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
     const pos = e.target.selectionStart
     const antes = valor.slice(0, pos)
     const m = antes.match(/(?:^|\s)@([\p{L}\p{N}_.]{0,32})$/u)
-    setSugestao(m ? { inicio: pos - m[1].length - 1, busca: m[1], indice: 0 } : null)
+    const em = antes.match(/(?:^|\s):([A-Za-z0-9_]{2,32})$/)
+    setSugestao(
+      m ? { tipo: 'mencao', inicio: pos - m[1].length - 1, busca: m[1], indice: 0 }
+        : em ? { tipo: 'emoji', inicio: pos - em[1].length - 1, busca: em[1], indice: 0 }
+          : null,
+    )
     const agora = Date.now()
     if (valor.trim() && agora - ultimoDigitando.current > 3000) {
       ultimoDigitando.current = agora
@@ -76,9 +92,31 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
     }
   }
 
+  // insere um texto na posição do cursor (emoji do seletor)
+  function inserir(trecho, escolha) {
+    const el = campo.current
+    const ini = el?.selectionStart ?? texto.length
+    const fim = el?.selectionEnd ?? texto.length
+    const antes = texto.slice(0, ini)
+    const espaco = antes && !/\s$/.test(antes) && escolha ? ' ' : ''
+    setTexto(antes + espaco + trecho + texto.slice(fim))
+    if (escolha) setEscolhidos((l) => [...l.filter((x) => x.rotulo !== escolha.rotulo), escolha])
+    cursor.current = ini + espaco.length + trecho.length
+    el?.focus()
+  }
+
   function escolher(op) {
     const el = campo.current
     const fim = el.selectionStart
+    if (op.emoji) {
+      const rotulo = `:${op.rotulo}:`
+      setTexto(texto.slice(0, sugestao.inicio) + rotulo + ' ' + texto.slice(fim))
+      setEscolhidos((l) => [...l.filter((x) => x.rotulo !== rotulo), { rotulo, codigo: op.codigo }])
+      cursor.current = sugestao.inicio + rotulo.length + 1
+      setSugestao(null)
+      el.focus()
+      return
+    }
     const rotulo = op.codigo === '@todos' ? '@todos' : `@${op.rotulo}`
     const novo = texto.slice(0, sugestao.inicio) + rotulo + ' ' + texto.slice(fim)
     setTexto(novo)
@@ -179,7 +217,9 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
       <div className="compositor bloqueado">
         {castigo
           ? `Você está de castigo até ${new Date(visao.eu.castigadoAte).toLocaleString('pt-BR')}. Dá para ler, mas não para escrever.`
-          : 'Você não pode enviar mensagens neste canal.'}
+          : canal.tipoConversa === 'dm'
+            ? 'Não dá para mandar mensagens nesta conversa (alguém bloqueou).'
+            : 'Você não pode enviar mensagens neste canal.'}
       </div>
     )
   }
@@ -201,12 +241,18 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
       }}
     >
       {sugestao && opcoes.length > 0 && (
-        <ul className="sugestoes" role="listbox" aria-label="Mencionar">
+        <ul className="sugestoes" role="listbox" aria-label={sugestao.tipo === 'emoji' ? 'Emojis' : 'Mencionar'}>
           {opcoes.map((op, i) => (
             <li key={op.chave} role="option" aria-selected={i === sugestao.indice}>
               <button onMouseDown={(e) => (e.preventDefault(), escolher(op))}>
-                {op.id ? <Avatar nome={op.rotulo} id={op.id} src={op.avatar} tamanho={24} /> : <span className="sugestao-arroba">@</span>}
-                <strong>{op.rotulo}</strong>
+                {op.imagem ? (
+                  <img className="sugestao-emoji" src={op.imagem} alt="" />
+                ) : op.id ? (
+                  <Avatar nome={op.rotulo} id={op.id} src={op.avatar} tamanho={24} />
+                ) : (
+                  <span className="sugestao-arroba">@</span>
+                )}
+                <strong>{op.emoji ? `:${op.rotulo}:` : op.rotulo}</strong>
                 <small>{op.detalhe}</small>
               </button>
             </li>
@@ -245,22 +291,51 @@ export default function Compositor({ visao, canal, membros, podeEnviar, responde
             <input ref={arquivo} type="file" multiple hidden onChange={(e) => (adicionarArquivos(e.target.files), (e.target.value = ''))} />
           </>
         )}
+        <button className="icone-botao" onClick={() => setEnquete(true)} aria-label="Criar enquete" title="Criar enquete">
+          <Icone nome="enquete" />
+        </button>
         <textarea
           ref={campo}
           value={texto}
           onChange={aoMudar}
           onKeyDown={teclas}
           onPaste={(e) => e.clipboardData.files.length && (e.preventDefault(), adicionarArquivos(e.clipboardData.files))}
-          placeholder={`Mensagem em #${canal.nome}`}
+          placeholder={canal.ehFio ? 'Responder no fio' : canal.tipoConversa === 'dm' ? `Mensagem para @${canal.outros?.[0]?.nomeUsuario || canal.nome}` : canal.tipoConversa ? `Mensagem em ${canal.nome}` : `Mensagem em #${canal.nome}`}
           rows={1}
           maxLength={4000}
           aria-label={`Mensagem em #${canal.nome}`}
         />
+        <span className="compositor-emoji">
+          <button className={`icone-botao ${seletor ? 'ligado' : ''}`} onClick={() => setSeletor((s) => !s)} aria-label="Emojis" title="Emojis" aria-expanded={seletor}>
+            <Icone nome="emoji" />
+          </button>
+          {seletor && (
+            <SeletorEmoji
+              servidorId={visao.servidor.id}
+              aoFechar={() => setSeletor(false)}
+              aoEscolher={({ texto: t, emoji }) => {
+                if (t) inserir(t)
+                else inserir(`:${emoji.nome}: `, { rotulo: `:${emoji.nome}:`, codigo: `<${emoji.animado ? 'a' : ''}:${emoji.nome}:${emoji.id}>` })
+                setSeletor(false)
+              }}
+            />
+          )}
+        </span>
         <button className="icone-botao enviar" onClick={enviar} aria-label="Enviar" disabled={!texto.trim() && !envios.some((e) => e.anexo)}>
           <Icone nome="enviar" />
         </button>
       </div>
       {erro && <p className="erro compositor-erro">{erro}</p>}
+      {enquete && (
+        <CriarEnquete
+          canal={canal}
+          aoFechar={() => setEnquete(false)}
+          aoCriar={(m) => {
+            despachar({ tipo: 'MENSAGEM_CRIADA', s: visao.servidor.id, c: canal.id, d: m })
+            aoEnviar()
+          }}
+        />
+      )}
     </div>
   )
 }

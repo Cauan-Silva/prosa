@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal.jsx'
+import Icone from './Icone.jsx'
 import CartaoMembro from './CartaoMembro.jsx'
 import { Avatar, Azulejo } from './Azulejo.jsx'
-import { api, enviarIconeServidor } from '../servicos/api.js'
+import { api, enviarEmoji, enviarIconeServidor } from '../servicos/api.js'
 import { recortar } from '../servicos/imagem.js'
 import { nomeDe, corDe, useEstado } from '../servicos/estado.jsx'
 import { GRUPOS, P, porChave, big, numero, tem } from '../servicos/permissoes.js'
@@ -14,6 +15,7 @@ const CORES = [0x1f3fa6, 0x14635a, 0x2f9e44, 0xe8b420, 0xd9480f, 0xc9472f, 0x9c2
 const ABAS = [
   ['geral', 'Geral', P.GerenciarServidor],
   ['cargos', 'Cargos', P.GerenciarCargos],
+  ['emojis', 'Emojis', P.GerenciarServidor],
   ['membros', 'Membros', 0n],
   ['convites', 'Convites', P.GerenciarServidor],
   ['banimentos', 'Banimentos', P.Banir],
@@ -38,6 +40,7 @@ export default function ConfigServidor({ visao, aba: abaInicial, aoFechar }) {
         <div className="config-conteudo">
           {aba === 'geral' && <Geral visao={visao} aoFechar={aoFechar} />}
           {aba === 'cargos' && <Cargos visao={visao} />}
+          {aba === 'emojis' && <Emojis visao={visao} />}
           {aba === 'membros' && <ListaMembros visao={visao} />}
           {aba === 'convites' && <Convites visao={visao} />}
           {aba === 'banimentos' && <Banimentos visao={visao} />}
@@ -152,6 +155,112 @@ function Geral({ visao, aoFechar }) {
         </section>
       )}
     </>
+  )
+}
+
+function Emojis({ visao }) {
+  const sid = visao.servidor.id
+  const emojis = visao.emojis || []
+  const [nome, setNome] = useState('')
+  const [arquivo, setArquivo] = useState(null)
+  const [previa, setPrevia] = useState('')
+  const [msg, setMsg] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+  const entrada = useRef(null)
+
+  function escolher(f) {
+    if (!f) return
+    setArquivo(f)
+    setPrevia(URL.createObjectURL(f))
+    // sugere o nome a partir do arquivo (sem extensão, só letras, números e _)
+    if (!nome) {
+      const base = f.name.replace(/\.[^.]+$/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32)
+      if (base.length >= 2) setNome(base.toLowerCase())
+    }
+  }
+
+  async function enviar(e) {
+    e.preventDefault()
+    setMsg('')
+    setOcupado(true)
+    try {
+      // emoji pequeno: 128 px, inteiro (sem cortar); GIF até 512 KB vai como está (animado)
+      const blob = await recortar(arquivo, 128, 128, { manterGif: true, conter: true, limiteGif: 512 << 10 })
+      const novo = await enviarEmoji(sid, nome, blob)
+      setMsg(`Emoji :${novo.nome}: adicionado. Use digitando :${novo.nome}: nas mensagens.`)
+      setNome('')
+      setArquivo(null)
+      setPrevia('')
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  async function renomear(e, novoNome) {
+    if (novoNome === e.nome) return
+    try {
+      await api.renomearEmoji(sid, e.id, novoNome)
+    } catch (err) {
+      setMsg(err.message)
+    }
+  }
+
+  async function apagar(e) {
+    if (!confirm(`Apagar o emoji :${e.nome}:? Ele some de todas as mensagens.`)) return
+    try {
+      await api.apagarEmoji(sid, e.id)
+    } catch (err) {
+      setMsg(err.message)
+    }
+  }
+
+  return (
+    <section className="emojis-config">
+      <p className="dica">
+        Emojis próprios do servidor. Qualquer pessoa daqui usa digitando <code>:nome:</code> ou pelo botão de emojis, e eles aparecem
+        em qualquer canal ou conversa. Até 50 por servidor ({emojis.length}/50).
+      </p>
+      <form className="emoji-novo" onSubmit={enviar}>
+        <button type="button" className="emoji-previa" onClick={() => entrada.current.click()} aria-label="Escolher imagem do emoji">
+          {previa ? <img src={previa} alt="" /> : <span>+</span>}
+        </button>
+        <input ref={entrada} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => (escolher(e.target.files[0]), (e.target.value = ''))} />
+        <label>
+          Nome
+          <input value={nome} onChange={(e) => setNome(e.target.value.replace(/[^A-Za-z0-9_]/g, ''))} placeholder="ex.: cafezinho" maxLength={32} />
+        </label>
+        <button className="botao primario" disabled={!arquivo || nome.length < 2 || ocupado || emojis.length >= 50}>
+          {ocupado ? 'Enviando…' : 'Adicionar emoji'}
+        </button>
+      </form>
+      {msg && <p role="status" className="dica">{msg}</p>}
+      {emojis.length > 0 && (
+        <ul className="lista-emojis">
+          {emojis.map((e) => (
+            <li key={`${e.id}:${e.nome}`}>
+              <img src={e.url} alt="" />
+              <span className="emoji-nome-campo">
+                :
+                <input
+                  defaultValue={e.nome}
+                  maxLength={32}
+                  aria-label={`Nome do emoji ${e.nome}`}
+                  onBlur={(ev) => renomear(e, ev.target.value.replace(/[^A-Za-z0-9_]/g, ''))}
+                  onKeyDown={(ev) => ev.key === 'Enter' && ev.target.blur()}
+                />
+                :
+              </span>
+              {e.animado && <small className="etiqueta">animado</small>}
+              <button className="icone-botao perigo" onClick={() => apagar(e)} aria-label={`Apagar :${e.nome}:`} title="Apagar">
+                <Icone nome="lixo" tamanho={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -450,6 +559,11 @@ const ACOES = {
   cargo_tirado: 'tirou cargo',
   servidor_alterado: 'alterou o servidor',
   icone_alterado: 'trocou a imagem do servidor',
+  emoji_criado: 'adicionou o emoji',
+  emoji_apagado: 'apagou o emoji',
+  mensagem_fixada: 'fixou uma mensagem',
+  fio_apagado: 'apagou um fio',
+  mensagem_desafixada: 'desafixou uma mensagem',
   icone_removido: 'removeu a imagem do servidor',
   apelido_alterado: 'mudou apelido',
 }

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "padrao",
+  "description": "O que o site do Prosa (carregado do servidor) pode pedir ao programa",
+  "windows": ["principal"],
+  "remote": {
+    "urls": ["https://prosa-s4u4.onrender.com/*"]
+  },
+  "permissions": ["core:default", "autostart:default"]
+}
