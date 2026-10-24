@@ -66,7 +66,11 @@ function Palco({ visao, canal, pessoas }) {
     <div className="palco">
       {voz.estado === 'conectando' && <p className="aviso-lista">Conectando à sala…</p>}
       {voz.erro && <p className="erro palco-erro">{voz.erro}</p>}
-      {voz.semMicrofone && <p className="dica palco-erro">Sem microfone: você está só ouvindo.</p>}
+      {voz.semMicrofone && (
+        <p className="dica palco-erro">
+          <strong>Sem microfone: você está só ouvindo.</strong> {voz.motivoSemMicrofone}
+        </p>
+      )}
       {prefs.voz.modo === 'ptt' && !voz.mudo && (
         <p className={`dica palco-erro ptt ${voz.pttAtivo ? 'ligado' : ''}`}>
           {voz.pttAtivo ? 'Falando…' : `Segure ${nomeTecla(prefs.voz.teclaPtt)} para falar`}
@@ -247,14 +251,20 @@ export function Controles({ perm, compacto }) {
       {!compacto && voz.tela && (
         <div className="modo-tela" role="radiogroup" aria-label="Prioridade da tela">
           {[
+            ['auto', 'Automático', 'Equilibra sozinho: até 1080p e 60 fps, baixando só quando o computador ou a internet não dão conta'],
             ['nitido', 'Nítido', 'Mais resolução, 10 quadros por segundo (texto, código, slides)'],
-            ['fluido', 'Fluido', '30 quadros por segundo (o equilíbrio)'],
+            ['fluido', 'Fluido', '30 quadros por segundo, fixo'],
             ['fps60', '60 fps', '60 quadros por segundo; baixa a resolução se precisar (jogos, vídeos). Gasta mais internet'],
           ].map(([v, r, dica]) => (
             <button key={v} role="radio" aria-checked={voz.modoTela === v} title={dica} onClick={() => voz.mudarModoTela(v)}>
               {r}
             </button>
           ))}
+          {voz.modoTela === 'auto' && voz.infoTela && (
+            <span className="info-tela" title="O que sua tela está enviando agora (o automático ajusta sozinho)">
+              {voz.infoTela}
+            </span>
+          )}
         </div>
       )}
       <button className="controle sair" onClick={voz.sair} title="Sair da sala" aria-label="Sair da sala">

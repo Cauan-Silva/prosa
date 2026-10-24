@@ -6,5 +6,5 @@
   "remote": {
     "urls": ["https://prosa-s4u4.onrender.com/*"]
   },
-  "permissions": ["core:default", "autostart:default"]
+  "permissions": ["core:default", "autostart:default", "allow-definir-ptt", "allow-versao-desktop"]
 }

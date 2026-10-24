@@ -16,17 +16,58 @@ import { aoPttGlobal, aoSairDaVozDesktop, definirPttGlobal, noDesktop } from './
 
 const Contexto = createContext(null)
 const TIPOS = ['audio', 'camera', 'tela', 'telaAudio']
+const LIMIAR_FALA = 0.015 // ~ -36 dBFS
+const SEGURA_FALA_MS = 280
+
+/** Prefere H.264 no vídeo: no Windows costuma ser codificado pela placa de vídeo (bem menos processador). */
+function preferirH264(transceptor) {
+  try {
+    const caps = RTCRtpReceiver.getCapabilities?.('video')
+    if (!caps || !transceptor?.setCodecPreferences) return
+    const ehH264 = (c) => c.mimeType.toLowerCase() === 'video/h264'
+    const h264 = caps.codecs.filter(ehH264)
+    if (h264.length) transceptor.setCodecPreferences([...h264, ...caps.codecs.filter((c) => !ehH264(c))])
+  } catch {
+    // navegador sem suporte: fica com o codec padrão
+  }
+}
+
 const tipoDeMidia = (tipo) => (tipo === 'audio' || tipo === 'telaAudio' ? 'audio' : 'video')
 
 // Modos da tela compartilhada: quadros por segundo capturados e enviados, e quanta banda
 // cada cópia pode usar (no modo direto o total é dividido entre quem assiste).
 // "fps60" baixa a resolução antes de perder quadros: bom para jogos e vídeos.
 const MODOS_TELA = {
+  // automático: começa em 1080p 30 fps e sobe ou desce sozinho (veja NIVEIS_AUTO)
+  auto: { captura: 30, maxFramerate: 30, maxBitrate: 4_000_000, total: 16_000_000, minimo: 800_000, preferencia: 'balanced', dica: 'motion' },
   nitido: { captura: 15, maxFramerate: 10, maxBitrate: 1_200_000, total: 3_000_000, minimo: 500_000, preferencia: 'maintain-resolution', dica: 'detail' },
   fluido: { captura: 30, maxFramerate: 30, maxBitrate: 2_000_000, total: 4_000_000, minimo: 700_000, preferencia: 'maintain-framerate', dica: 'motion' },
   fps60: { captura: 60, maxFramerate: 60, maxBitrate: 4_500_000, total: 8_000_000, minimo: 1_500_000, preferencia: 'maintain-framerate', dica: 'motion' },
 }
-const modoDaTela = (modo) => MODOS_TELA[modo] || MODOS_TELA.fluido
+const modoDaTela = (modo) => MODOS_TELA[modo] || MODOS_TELA.auto
+
+// Degraus do modo automático, do melhor para o mais leve. A resolução é reduzida a partir
+// do que é capturado (até 1080p): escala 1.5 = 720p, 2 = 540p.
+const NIVEIS_AUTO = [
+  { fps: 60, escala: 1, bitrate: 6_000_000 },
+  { fps: 30, escala: 1, bitrate: 4_000_000 },
+  { fps: 30, escala: 1.5, bitrate: 2_500_000 },
+  { fps: 24, escala: 2, bitrate: 1_200_000 },
+]
+const NIVEL_AUTO_INICIAL = 1
+
+function lerModoTela() {
+  try {
+    // quem já usava o Prosa passa para o automático uma vez; depois vale o que escolher
+    if (!localStorage.getItem('prosa.modoTelaAuto')) {
+      localStorage.setItem('prosa.modoTelaAuto', '1')
+      localStorage.setItem('prosa.modoTela', 'auto')
+    }
+    return localStorage.getItem('prosa.modoTela') || 'auto'
+  } catch {
+    return 'auto'
+  }
+}
 
 const inicial = {
   canalId: null,
@@ -39,13 +80,7 @@ const inicial = {
   tela: false,
   semMicrofone: false,
   telaComSom: false,
-  modoTela: (() => {
-    try {
-      return localStorage.getItem('prosa.modoTela') || 'fluido'
-    } catch {
-      return 'fluido'
-    }
-  })(),
+  modoTela: lerModoTela(),
 }
 
 function enderecoVoz(base, canalId) {
@@ -54,6 +89,26 @@ function enderecoVoz(base, canalId) {
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
   u.searchParams.set('t', lerToken() || '')
   return u.toString()
+}
+
+/** Explica em português por que o microfone não abriu (o navegador só dá o nome do erro). */
+function motivoMicrofone(e) {
+  const desktop = !!window.__TAURI__
+  switch (e?.name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return desktop
+        ? 'O microfone foi bloqueado. No Windows, abra Configurações → Privacidade e segurança → Microfone e ligue “Permitir que aplicativos da área de trabalho acessem o microfone”. Se você recusou o pedido do Prosa, veja em Configurações → App como pedir de novo.'
+        : 'O microfone foi bloqueado. Clique no cadeado ao lado do endereço do site, permita o microfone e entre na sala de novo.'
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'Nenhum microfone encontrado. Confira se ele está conectado e escolha em Configurações → Voz e vídeo.'
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'O microfone está sendo usado por outro programa (ou o Windows não deixou abrir). Feche o outro programa e entre na sala de novo.'
+    default:
+      return `Não foi possível abrir o microfone${e?.name ? ` (${e.name})` : ''}.`
+  }
 }
 
 class Sessao {
@@ -72,7 +127,9 @@ class Sessao {
     this.fila = Promise.resolve()
     this.niveis = {}
     this.fechada = false
-    this.modoTela = 'fluido'
+    this.modoTela = 'auto'
+    this.auto = null // estado do modo automático da tela
+    this.infoTela = '' // o que está sendo enviado agora (ex.: "1080p · 60 fps")
   }
 
   async entrar(servidorId, canalId, desejado) {
@@ -83,8 +140,10 @@ class Sessao {
     this.ice = info.ice
     try {
       await this.abrirMicrofone()
-    } catch {
+    } catch (e) {
       this.semMicrofone = true // entra só para ouvir
+      this.motivoSemMicrofone = motivoMicrofone(e)
+      console.warn('microfone:', e?.name, e?.message)
     }
     await this.conectar(info.endereco, 0)
   }
@@ -96,7 +155,7 @@ class Sessao {
     const antigo = this.proc
     this.proc = novo
     novo.track.enabled = !this.desejado.mudo && !this.desejado.surdo
-    this.niveis.eu = () => novo.nivelSaida() * 128
+    this.niveis.eu = () => novo.nivelSaida() // depois do portão e do pressionar para falar
     await this.trocarFaixa('audio', novo.track)
     antigo?.destruir()
     this.semMicrofone = false
@@ -210,6 +269,7 @@ class Sessao {
       const tipo = mids[t.mid]
       if (!tipo) continue
       if (t.direction !== 'sendonly') t.direction = 'sendonly'
+      if (tipo === 'tela') preferirH264(t)
       const faixa = this.faixas[tipo]
       if (t.sender.track !== faixa) await t.sender.replaceTrack(faixa)
     }
@@ -284,7 +344,10 @@ class Sessao {
     par.tentativas = tentativas
     const pc = par.pc
     try {
-      for (const tipo of TIPOS) pc.addTransceiver(this.faixas[tipo] || tipoDeMidia(tipo), { direction: 'sendrecv' })
+      for (const tipo of TIPOS) {
+        const t = pc.addTransceiver(this.faixas[tipo] || tipoDeMidia(tipo), { direction: 'sendrecv' })
+        if (tipo === 'tela') preferirH264(t)
+      }
       await pc.setLocalDescription(await pc.createOffer())
       if (this.pares.get(id) !== par) return
       this.mandarPar(id, { tipo: 'oferta', n, sdp: pc.localDescription.sdp })
@@ -306,6 +369,7 @@ class Sessao {
           const ts = pc.getTransceivers()
           for (let i = 0; i < ts.length && i < TIPOS.length; i++) {
             ts[i].direction = 'sendrecv'
+            if (TIPOS[i] === 'tela') preferirH264(ts[i])
             await ts[i].sender.replaceTrack(this.faixas[TIPOS[i]] || null)
           }
           await pc.setLocalDescription(await pc.createAnswer())
@@ -369,7 +433,11 @@ class Sessao {
       telaAudio: { maxBitrate: 96_000 }, // som da tela com qualidade de música
       tela: (() => {
         const m = modoDaTela(this.modoTela)
-        return { maxBitrate: dividir(m.maxBitrate, m.total, m.minimo), maxFramerate: m.maxFramerate, preferencia: m.preferencia }
+        if (this.modoTela === 'auto' && this.auto) {
+          const n = NIVEIS_AUTO[this.auto.nivel]
+          return { maxBitrate: dividir(n.bitrate, m.total, m.minimo), maxFramerate: n.fps, preferencia: m.preferencia, escala: n.escala }
+        }
+        return { maxBitrate: dividir(m.maxBitrate, m.total, m.minimo), maxFramerate: m.maxFramerate, preferencia: m.preferencia, escala: 1 }
       })(),
     }
     for (const [tipo, r] of Object.entries(regras)) {
@@ -380,6 +448,7 @@ class Sessao {
           if (!p.encodings?.length) p.encodings = [{}]
           p.encodings[0].maxBitrate = r.maxBitrate
           if (r.maxFramerate) p.encodings[0].maxFramerate = r.maxFramerate
+          if (r.escala) p.encodings[0].scaleResolutionDownBy = r.escala
           if (r.preferencia) p.degradationPreference = r.preferencia
           await envio.setParameters(p)
         } catch {
@@ -392,6 +461,9 @@ class Sessao {
   async mudarModoTela(modo) {
     this.modoTela = modo
     const faixa = this.faixas.tela
+    if (modo === 'auto') {
+      if (faixa) return this.iniciarAuto()
+    } else this.pararAuto()
     if (faixa) {
       const m = modoDaTela(modo)
       faixa.contentHint = m.dica
@@ -408,11 +480,100 @@ class Sessao {
     return this.pc?.getTransceivers().find((t) => this.mids[t.mid] === tipo)
   }
 
+  // ---- modo automático da tela ----
+  // A cada 2 s lê as estatísticas de envio do navegador. Se o processador ou a internet
+  // estão segurando o vídeo (qualityLimitationReason), desce um degrau; se ficou 8 s sem
+  // nenhum limite, sobe. Tela parada manda poucos quadros, e isso não conta como problema.
+
+  iniciarAuto() {
+    this.pararAuto()
+    const agora = performance.now()
+    this.auto = { nivel: NIVEL_AUTO_INICIAL, amostras: [], bloqueio: {}, inicio: agora, ultimaTroca: agora }
+    this.timerAuto = setInterval(() => this.medirTela(), 2000)
+    return this.aplicarNivelAuto()
+  }
+
+  pararAuto() {
+    clearInterval(this.timerAuto)
+    this.timerAuto = null
+    this.auto = null
+    this.infoTela = ''
+  }
+
+  async aplicarNivelAuto() {
+    const n = NIVEIS_AUTO[this.auto.nivel]
+    const faixa = this.faixas.tela
+    if (faixa) {
+      faixa.contentHint = 'motion'
+      await faixa.applyConstraints({ frameRate: { ideal: n.fps, max: n.fps } }).catch(() => {})
+    }
+    await this.ajustarQualidade()
+  }
+
+  async medirTela() {
+    const a = this.auto
+    if (!a || !this.faixas.tela || this.fechada) return
+    let pior = null
+    for (const envio of this.envios('tela')) {
+      if (!envio.track) continue
+      const st = await envio.getStats().catch(() => null)
+      if (!st) continue
+      let s = null
+      let banda = null // banda que o navegador estima ter para esta conexão
+      st.forEach((r) => {
+        if (r.type === 'outbound-rtp' && r.kind === 'video') s = { fps: r.framesPerSecond || 0, limite: r.qualityLimitationReason || 'none', altura: r.frameHeight || 0 }
+        if (r.type === 'candidate-pair' && r.availableOutgoingBitrate && (r.nominated || r.state === 'succeeded')) banda = Math.max(banda || 0, r.availableOutgoingBitrate)
+      })
+      if (!s) continue
+      s.banda = banda
+      // o pior envio decide (no modo direto há uma cópia por pessoa)
+      if (!pior || (s.limite !== 'none' && pior.limite === 'none') || (s.banda ?? Infinity) < (pior.banda ?? Infinity)) pior = s
+    }
+    if (!pior || this.auto !== a) return
+    a.amostras.push(pior)
+    if (a.amostras.length > 6) a.amostras.shift()
+    const agora = performance.now()
+    const ultimas = (n) => a.amostras.slice(-n)
+    const todas = (n, f) => ultimas(n).length === n && ultimas(n).every(f)
+    // No começo (e logo depois de cada troca) o navegador ainda está medindo a internet e
+    // acusa "bandwidth" por alguns segundos: isso não é internet ruim.
+    const medindo = agora - a.inicio < 15000 || agora - a.ultimaTroca < 6000
+    // O navegador acusa "bandwidth" também enquanto sobe a resolução aos poucos; só é falta
+    // de banda de verdade quando a banda estimada não cobre 70% do que o degrau pede.
+    const precisa = NIVEIS_AUTO[a.nivel].bitrate
+    const faltaBanda = (s) => s.limite === 'bandwidth' && (s.banda == null || s.banda < precisa * 0.7)
+    // processador no limite: desce rápido (é o que engasga); banda: só se durar 8 s, porque
+    // nas oscilações curtas o próprio codificador já baixa a resolução sozinho
+    const descer = todas(2, (s) => s.limite === 'cpu') || (!medindo && todas(4, faltaBanda))
+    const acima = a.nivel > 0 ? NIVEIS_AUTO[a.nivel - 1].bitrate : 0
+    const folga = (s) => s.limite !== 'cpu' && !faltaBanda(s) && (s.banda == null || s.banda >= acima * 0.8)
+    let novo = a.nivel
+    if (descer && a.nivel < NIVEIS_AUTO.length - 1 && agora - a.ultimaTroca > 3000) {
+      a.bloqueio[a.nivel] = agora + 30000 // não tenta este degrau de novo por 30 s
+      novo = a.nivel + 1
+    } else if (
+      a.nivel > 0 && todas(4, folga) &&
+      (a.bloqueio[a.nivel - 1] || 0) < agora && agora - a.ultimaTroca > 8000
+    ) {
+      novo = a.nivel - 1
+    }
+    if (novo !== a.nivel) {
+      a.nivel = novo
+      a.ultimaTroca = agora
+      a.amostras = []
+      await this.aplicarNivelAuto()
+    }
+    const fps = Math.round(pior.fps)
+    this.infoTela = `${pior.altura ? `${pior.altura}p · ` : ''}até ${NIVEIS_AUTO[a.nivel].fps} fps${fps ? ` (agora ${fps})` : ''}`
+    this.aoMudar()
+  }
+
   async trocarFaixa(tipo, faixa) {
     const antiga = this.faixas[tipo]
     if (antiga && antiga !== faixa) antiga.stop()
     this.faixas[tipo] = faixa
     if (tipo === 'camera' || tipo === 'tela') this.locais[tipo] = faixa ? new MediaStream([faixa]) : null
+    if (tipo === 'tela' && !faixa) this.pararAuto()
     await Promise.all(this.envios(tipo).map((e) => e.replaceTrack(faixa).catch(() => {})))
     if (faixa) await this.ajustarQualidade()
   }
@@ -431,19 +592,20 @@ class Sessao {
     })
   }
 
-  // Mede o volume de cada voz para mostrar quem está falando.
+  // Mede o volume de cada voz para mostrar quem está falando (RMS de ~40 ms, de 0 a 1).
   medir(chave, stream) {
     try {
       this.audio ||= new AudioContext()
+      this.audio.resume().catch(() => {})
       const fonte = this.audio.createMediaStreamSource(stream)
       const analisador = this.audio.createAnalyser()
-      analisador.fftSize = 512
+      analisador.fftSize = 2048
       fonte.connect(analisador)
-      const dados = new Uint8Array(analisador.fftSize)
+      const dados = new Float32Array(analisador.fftSize)
       this.niveis[chave] = () => {
-        analisador.getByteTimeDomainData(dados)
+        analisador.getFloatTimeDomainData(dados)
         let soma = 0
-        for (const v of dados) soma += (v - 128) ** 2
+        for (const v of dados) soma += v * v
         return Math.sqrt(soma / dados.length)
       }
     } catch {
@@ -451,14 +613,22 @@ class Sessao {
     }
   }
 
+  // Quem está falando: acende assim que a voz passa do limite e fica aceso um pouco
+  // depois (para não piscar entre uma palavra e outra).
   falando() {
+    const agora = performance.now()
+    this.ultimaFala ||= {}
     const saida = {}
-    for (const [chave, nivel] of Object.entries(this.niveis)) if (nivel() > 6) saida[chave] = true
+    for (const [chave, nivel] of Object.entries(this.niveis)) {
+      if (nivel() > LIMIAR_FALA) this.ultimaFala[chave] = agora
+      if (agora - (this.ultimaFala[chave] || 0) < SEGURA_FALA_MS) saida[chave] = true
+    }
     return saida
   }
 
   sair() {
     this.fechada = true
+    this.pararAuto()
     this.ws?.close()
     this.fecharServidor()
     for (const id of [...this.pares.keys()]) this.fecharPar(id)
@@ -536,7 +706,7 @@ export function VozProvider({ children }) {
       try {
         await s.entrar(servidorId, canalId, { mudo: atual.mudo, surdo: atual.surdo })
         if (sessao.current !== s) return
-        setEstado((e) => ({ ...e, estado: 'conectada', semMicrofone: !!s.semMicrofone }))
+        setEstado((e) => ({ ...e, estado: 'conectada', semMicrofone: !!s.semMicrofone, motivoSemMicrofone: s.motivoSemMicrofone || '' }))
         salaDeVoz.canalId = canalId
         tocar('vozEntrar')
       } catch (err) {
@@ -616,6 +786,7 @@ export function VozProvider({ children }) {
         }
         await s.trocarFaixa('tela', faixa)
         await s.trocarFaixa('telaAudio', som)
+        if (s.modoTela === 'auto') await s.iniciarAuto()
         setEstado((e) => ({ ...e, telaComSom: !!som }))
       }
       s.enviarEstado()
@@ -698,13 +869,13 @@ export function VozProvider({ children }) {
     await sessao.current?.mudarModoTela(modo)
   }, [])
 
-  // quem está falando (atualiza poucas vezes por segundo)
+  // quem está falando (o React só redesenha quando alguém começa ou para de falar)
   useEffect(() => {
     if (estado.estado !== 'conectada') return
     const t = setInterval(() => {
       const f = sessao.current?.falando() || {}
       setFalando((antes) => (JSON.stringify(antes) === JSON.stringify(f) ? antes : f))
-    }, 250)
+    }, 60)
     return () => clearInterval(t)
   }, [estado.estado])
 
@@ -742,6 +913,7 @@ export function VozProvider({ children }) {
     falando,
     remotos: s?.remotos || {},
     modo: s?.modo || null,
+    infoTela: s?.infoTela || '',
     local: s?.locais || { camera: null, tela: null },
     entrar,
     sair,

@@ -54,7 +54,7 @@ export class Processador {
     if (opcoes?.supressaoIA) this.ligarIA()
     // nível depois do portão (para mostrar quem está falando)
     this.analisadorSaida = this.ctx.createAnalyser()
-    this.analisadorSaida.fftSize = 512
+    this.analisadorSaida.fftSize = 2048 // ~40 ms: o indicador de fala não pisca entre sílabas
     this.portao.connect(this.analisadorSaida)
     this.track = saida.stream.getAudioTracks()[0]
     this.stream = saida.stream

@@ -3712,3 +3712,16 @@ kbd {
   gap: 6px;
   margin-bottom: 6px;
 }
+
+.modo-tela .info-tela {
+  align-self: center;
+  padding: 0 10px 0 6px;
+  font-size: 12px;
+  color: #c9d1f5;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .modo-tela .info-tela {
+    display: none;
+  }
+}

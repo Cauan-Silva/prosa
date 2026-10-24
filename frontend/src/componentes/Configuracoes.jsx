@@ -706,6 +706,14 @@ function ProgramaWindows() {
         />
         {erro && <p className="erro">{erro}</p>}
         <p className="dica">“Pressionar para falar” funciona mesmo com outra janela na frente, inclusive jogos em tela cheia.</p>
+        <h3>Microfone bloqueado?</h3>
+        <ol className="dica">
+          <li>No Windows: Configurações → Privacidade e segurança → Microfone → ligue “Permitir que aplicativos da área de trabalho acessem o microfone”.</li>
+          <li>
+            Se você recusou o pedido do Prosa: saia pelo ícone ao lado do relógio (Sair do Prosa), aperte Win + R, digite <code>%LOCALAPPDATA%\com.cauansilva.prosa</code>,
+            apague a pasta <code>EBWebView</code> e abra o Prosa de novo (ele pede o microfone outra vez; é preciso entrar na conta de novo).
+          </li>
+        </ol>
       </section>
     )
   }
