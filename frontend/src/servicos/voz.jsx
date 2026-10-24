@@ -32,6 +32,35 @@ function preferirH264(transceptor) {
   }
 }
 
+// Codec da tela no modo direto. AV1 e VP9 entregam a mesma imagem com bem menos banda que
+// o H.264 (o AV1 chega a ~40% a menos, e ainda mais em texto e código): como no modo direto
+// cada pessoa recebe uma cópia, isso é o que mais alivia o upload de quem transmite.
+// Só compensa quando a placa de vídeo codifica; com "usar mais o processador" ligado, o
+// processador pode fazer esse trabalho mais pesado no lugar dela.
+// Todos os codecs continuam negociados; quem transmite só escolhe qual usar para enviar.
+export async function escolherCodecTela(potente) {
+  const mc = navigator.mediaCapabilities
+  if (!mc?.encodingInfo || !window.RTCRtpSender?.getCapabilities) return null
+  const tem = new Set((RTCRtpSender.getCapabilities('video')?.codecs || []).map((c) => c.mimeType.toLowerCase()))
+  const testar = async (mime) => {
+    if (!tem.has(mime.toLowerCase())) return null
+    try {
+      return await mc.encodingInfo({ type: 'webrtc', video: { contentType: mime, width: 1920, height: 1080, bitrate: 4_000_000, framerate: 30 } })
+    } catch {
+      return null
+    }
+  }
+  const [av1, vp9, h264] = await Promise.all(['video/AV1', 'video/VP9', 'video/H264'].map(testar))
+  const leve = h264?.powerEfficient ? { mime: 'video/H264', gpu: true } : null
+  if (av1?.powerEfficient) return { mime: 'video/AV1', gpu: true, reserva: leve }
+  if (vp9?.powerEfficient) return { mime: 'video/VP9', gpu: true, reserva: leve }
+  if (potente && av1?.supported && av1.smooth) return { mime: 'video/AV1', gpu: false, reserva: leve }
+  if (potente && vp9?.supported) return { mime: 'video/VP9', gpu: false, reserva: leve }
+  return leve
+}
+
+const NOMES_CODEC = { 'video/av1': 'AV1', 'video/vp9': 'VP9', 'video/vp8': 'VP8', 'video/h264': 'H.264' }
+
 const tipoDeMidia = (tipo) => (tipo === 'audio' || tipo === 'telaAudio' ? 'audio' : 'video')
 
 // Modos da tela compartilhada: quadros por segundo capturados e enviados, e quanta banda
@@ -39,7 +68,8 @@ const tipoDeMidia = (tipo) => (tipo === 'audio' || tipo === 'telaAudio' ? 'audio
 // "fps60" baixa a resolução antes de perder quadros: bom para jogos e vídeos.
 const MODOS_TELA = {
   // automático: começa em 1080p 30 fps e sobe ou desce sozinho (veja NIVEIS_AUTO)
-  auto: { captura: 30, maxFramerate: 30, maxBitrate: 4_000_000, total: 16_000_000, minimo: 800_000, preferencia: 'balanced', dica: 'motion' },
+  // (fluidez primeiro: numa oscilação a resolução cai um pouco, mas os quadros continuam)
+  auto: { captura: 30, maxFramerate: 30, maxBitrate: 4_000_000, total: 16_000_000, minimo: 800_000, preferencia: 'maintain-framerate', dica: 'motion' },
   nitido: { captura: 15, maxFramerate: 10, maxBitrate: 1_200_000, total: 3_000_000, minimo: 500_000, preferencia: 'maintain-resolution', dica: 'detail' },
   fluido: { captura: 30, maxFramerate: 30, maxBitrate: 2_000_000, total: 4_000_000, minimo: 700_000, preferencia: 'maintain-framerate', dica: 'motion' },
   fps60: { captura: 60, maxFramerate: 60, maxBitrate: 4_500_000, total: 8_000_000, minimo: 1_500_000, preferencia: 'maintain-framerate', dica: 'motion' },
@@ -55,6 +85,11 @@ const NIVEIS_AUTO = [
   { fps: 24, escala: 2, bitrate: 1_200_000 },
 ]
 const NIVEL_AUTO_INICIAL = 1
+
+// Quem assiste segura este tanto de vídeo antes de mostrar (jitter buffer): os quadros
+// saem num ritmo constante mesmo quando os pacotes chegam aos trancos. Custa só um
+// atraso pequeno, que numa tela compartilhada quase não se nota.
+const ATRASO_TELA_MS = 150
 
 function lerModoTela() {
   try {
@@ -130,6 +165,10 @@ class Sessao {
     this.modoTela = 'auto'
     this.auto = null // estado do modo automático da tela
     this.infoTela = '' // o que está sendo enviado agora (ex.: "1080p · 60 fps")
+    this.codecTela = null // { mime, gpu, reserva } escolhido ao começar a compartilhar (modo direto)
+    this.recepcao = {} // usuarioId -> receptor da tela dessa pessoa (para medir o que chega)
+    this.infoRecebida = {} // usuarioId -> o que está chegando (ex.: "1080p · 30 fps · perda 2%")
+    this.timerRecepcao = null
   }
 
   async entrar(servidorId, canalId, desejado) {
@@ -241,6 +280,7 @@ class Sessao {
       const atual = (this.remotos[id] ||= {})
       atual[tipo] = new MediaStream([e.track])
       if (tipo === 'audio') this.medir(id, atual.audio)
+      else if (tipo === 'tela' || tipo === 'telaAudio') this.suavizarTela(id, tipo, e.receiver)
       e.track.onended = () => {
         delete atual[tipo]
         this.aoMudar()
@@ -289,6 +329,8 @@ class Sessao {
       if (modo === 'direto') this.fecharServidor()
       for (const id of [...this.pares.keys()]) this.fecharPar(id)
       this.remotos = {}
+      this.recepcao = {}
+      this.infoRecebida = {}
       this.niveis = this.niveis.eu ? { eu: this.niveis.eu } : {}
     }
     if (modo === 'direto') this.sincronizarPares()
@@ -325,6 +367,7 @@ class Sessao {
       const atual = (this.remotos[id] ||= {})
       atual[tipo] = new MediaStream([e.track])
       if (tipo === 'audio') this.medir(id, atual.audio)
+      else if (tipo === 'tela' || tipo === 'telaAudio') this.suavizarTela(id, tipo, e.receiver)
       this.aoMudar()
     }
     pc.onconnectionstatechange = () => {
@@ -389,7 +432,11 @@ class Sessao {
       return
     }
     par.fila = par.fila
-      .then(() => (s.tipo === 'resposta' ? par.pc.setRemoteDescription({ type: 'answer', sdp: s.sdp }) : par.pc.addIceCandidate(s.candidato)))
+      .then(async () => {
+        if (s.tipo !== 'resposta') return par.pc.addIceCandidate(s.candidato)
+        await par.pc.setRemoteDescription({ type: 'answer', sdp: s.sdp })
+        await this.ajustarQualidade() // agora os codecs estão negociados
+      })
       .catch(() => {})
   }
 
@@ -405,6 +452,61 @@ class Sessao {
     par.pc.close()
     delete this.remotos[id]
     delete this.niveis[id]
+    delete this.recepcao[id]
+    delete this.infoRecebida[id]
+  }
+
+  // ---- quem assiste uma tela ----
+
+  suavizarTela(id, tipo, receptor) {
+    try {
+      if ('jitterBufferTarget' in receptor) receptor.jitterBufferTarget = ATRASO_TELA_MS
+      else if ('playoutDelayHint' in receptor) receptor.playoutDelayHint = ATRASO_TELA_MS / 1000
+    } catch {
+      // navegador sem esse ajuste: mostra assim que chega
+    }
+    if (tipo !== 'tela') return
+    this.recepcao[id] = { receptor, antes: null }
+    this.timerRecepcao ||= setInterval(() => this.medirRecepcao(), 2000)
+  }
+
+  // Mede o que chega de cada tela: resolução, quadros por segundo, pacotes perdidos e
+  // travadas. Ajuda a ver se o engasgo vem da internet (perda) ou de quem manda (fps baixo).
+  async medirRecepcao() {
+    for (const [id, r] of Object.entries(this.recepcao)) {
+      if (r.receptor.track?.readyState !== 'live') {
+        delete this.recepcao[id]
+        delete this.infoRecebida[id]
+        continue
+      }
+      const st = await r.receptor.getStats().catch(() => null)
+      if (!st || this.recepcao[id] !== r) continue
+      let s = null
+      st.forEach((x) => {
+        if (x.type === 'inbound-rtp' && x.kind === 'video') s = x
+      })
+      if (!s) continue
+      const a = r.antes
+      r.antes = s
+      const partes = []
+      if (s.frameHeight) partes.push(`${s.frameHeight}p`)
+      if (s.framesPerSecond != null) partes.push(`${Math.round(s.framesPerSecond)} fps`)
+      if (a) {
+        const recebidos = (s.packetsReceived || 0) - (a.packetsReceived || 0)
+        const perdidos = Math.max(0, (s.packetsLost || 0) - (a.packetsLost || 0))
+        const pct = recebidos + perdidos > 0 ? (perdidos / (recebidos + perdidos)) * 100 : 0
+        if (pct >= 0.5) partes.push(`perda ${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`)
+        const travadas = (s.freezeCount || 0) - (a.freezeCount || 0)
+        if (travadas > 0) partes.push(travadas === 1 ? '1 travada' : `${travadas} travadas`)
+      }
+      if (s.powerEfficientDecoder === false) partes.push('decodificando no processador')
+      this.infoRecebida[id] = partes.join(' · ')
+    }
+    if (!Object.keys(this.recepcao).length) {
+      clearInterval(this.timerRecepcao)
+      this.timerRecepcao = null
+    }
+    if (!this.fechada) this.aoMudar()
   }
 
   // Todos os "envios" de um tipo de faixa: o da conexão com o servidor e o de cada conexão direta.
@@ -454,7 +556,26 @@ class Sessao {
         } catch {
           // navegador sem suporte a algum ajuste (ou conexão ainda negociando): segue com o padrão
         }
+        // codec da tela: só nas conexões diretas (o servidor repassa o codec com que a faixa começou)
+        if (tipo === 'tela' && envio !== this.transceptor('tela')?.sender) await this.aplicarCodec(envio)
       }
+    }
+  }
+
+  async aplicarCodec(envio) {
+    try {
+      const p = envio.getParameters()
+      if (!p.encodings?.length || !p.codecs?.length) return // ainda negociando
+      const quero = this.codecTela?.mime?.toLowerCase()
+      const atual = p.encodings[0].codec?.mimeType?.toLowerCase()
+      if (quero === atual) return
+      const c = quero && p.codecs.find((x) => x.mimeType.toLowerCase() === quero)
+      if (quero && !c) return // a outra pessoa não decodifica esse: fica com o negociado
+      if (c) p.encodings[0].codec = { mimeType: c.mimeType, clockRate: c.clockRate, ...(c.sdpFmtpLine ? { sdpFmtpLine: c.sdpFmtpLine } : {}) }
+      else delete p.encodings[0].codec
+      await envio.setParameters(p)
+    } catch {
+      // navegador sem escolha de codec por envio: fica com o negociado (H.264)
     }
   }
 
@@ -520,12 +641,16 @@ class Sessao {
       if (!st) continue
       let s = null
       let banda = null // banda que o navegador estima ter para esta conexão
+      let codecId = null
       st.forEach((r) => {
-        if (r.type === 'outbound-rtp' && r.kind === 'video') s = { fps: r.framesPerSecond || 0, limite: r.qualityLimitationReason || 'none', altura: r.frameHeight || 0 }
+        if (r.type === 'outbound-rtp' && r.kind === 'video') codecId = r.codecId
+        if (r.type === 'outbound-rtp' && r.kind === 'video')
+          s = { fps: r.framesPerSecond || 0, limite: r.qualityLimitationReason || 'none', altura: r.frameHeight || 0, gpu: r.powerEfficientEncoder }
         if (r.type === 'candidate-pair' && r.availableOutgoingBitrate && (r.nominated || r.state === 'succeeded')) banda = Math.max(banda || 0, r.availableOutgoingBitrate)
       })
       if (!s) continue
       s.banda = banda
+      s.codec = NOMES_CODEC[st.get(codecId)?.mimeType?.toLowerCase()] || ''
       // o pior envio decide (no modo direto há uma cópia por pessoa)
       if (!pior || (s.limite !== 'none' && pior.limite === 'none') || (s.banda ?? Infinity) < (pior.banda ?? Infinity)) pior = s
     }
@@ -548,6 +673,15 @@ class Sessao {
     const acima = a.nivel > 0 ? NIVEIS_AUTO[a.nivel - 1].bitrate : 0
     const folga = (s) => s.limite !== 'cpu' && !faltaBanda(s) && (s.banda == null || s.banda >= acima * 0.8)
     let novo = a.nivel
+    // processador não deu conta do codec pesado: antes de baixar a qualidade, volta para o
+    // H.264 da placa de vídeo (ou o padrão)
+    if (todas(2, (s) => s.limite === 'cpu') && this.codecTela && !this.codecTela.gpu) {
+      this.codecTela = this.codecTela.reserva
+      a.amostras = []
+      a.ultimaTroca = agora
+      await this.ajustarQualidade()
+      return
+    }
     if (descer && a.nivel < NIVEIS_AUTO.length - 1 && agora - a.ultimaTroca > 3000) {
       a.bloqueio[a.nivel] = agora + 30000 // não tenta este degrau de novo por 30 s
       novo = a.nivel + 1
@@ -564,7 +698,10 @@ class Sessao {
       await this.aplicarNivelAuto()
     }
     const fps = Math.round(pior.fps)
-    this.infoTela = `${pior.altura ? `${pior.altura}p · ` : ''}até ${NIVEIS_AUTO[a.nivel].fps} fps${fps ? ` (agora ${fps})` : ''}`
+    // quem codifica: a placa de vídeo (leve) ou o processador (pesa, ainda mais com várias cópias)
+    const quem = pior.gpu === true ? 'na placa de vídeo' : pior.gpu === false ? 'no processador' : ''
+    const codec = [pior.codec, quem].filter(Boolean).join(' ')
+    this.infoTela = `${pior.altura ? `${pior.altura}p · ` : ''}até ${NIVEIS_AUTO[a.nivel].fps} fps${fps ? ` (agora ${fps})` : ''}${codec ? ` · ${codec}` : ''}`
     this.aoMudar()
   }
 
@@ -629,6 +766,7 @@ class Sessao {
   sair() {
     this.fechada = true
     this.pararAuto()
+    clearInterval(this.timerRecepcao)
     this.ws?.close()
     this.fecharServidor()
     for (const id of [...this.pares.keys()]) this.fecharPar(id)
@@ -784,6 +922,7 @@ export function VozProvider({ children }) {
             tocar('desligar')
           }
         }
+        s.codecTela = await escolherCodecTela(!!preferencias().voz.telaPotente)
         await s.trocarFaixa('tela', faixa)
         await s.trocarFaixa('telaAudio', som)
         if (s.modoTela === 'auto') await s.iniciarAuto()
@@ -914,6 +1053,7 @@ export function VozProvider({ children }) {
     remotos: s?.remotos || {},
     modo: s?.modo || null,
     infoTela: s?.infoTela || '',
+    infoRecebida: s?.infoRecebida || {},
     local: s?.locais || { camera: null, tela: null },
     entrar,
     sair,

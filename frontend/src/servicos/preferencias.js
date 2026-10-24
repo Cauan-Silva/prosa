@@ -30,6 +30,7 @@ export const PADRAO = {
     teclaPtt: 'KeyV',
     volumeSaida: 1,
     volumes: {}, // volume de cada pessoa (id -> 0..2) e do som da tela de cada uma ("t" + id)
+    telaPotente: false, // tela compartilhada em AV1/VP9 pelo processador quando a placa de vídeo não codifica
     silenciados: [], // quem eu silenciei só para mim (ids, ou "t" + id para o som da tela)
   },
   notificacoes: {

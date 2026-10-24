@@ -93,6 +93,7 @@ function Palco({ visao, canal, pessoas }) {
               moderador={moderador && focado.p.usuarioId !== eu}
               aoModerar={voz.moderar}
               prefsVoz={prefs.voz}
+              info={focado.tela ? voz.infoRecebida[focado.p.usuarioId] : null}
               aoClicar={() => setFoco(null)}
             />
           </div>
@@ -109,6 +110,7 @@ function Palco({ visao, canal, pessoas }) {
               moderador={moderador && q.p.usuarioId !== eu}
               aoModerar={voz.moderar}
               prefsVoz={prefs.voz}
+              info={q.tela ? voz.infoRecebida[q.p.usuarioId] : null}
               aoClicar={() => (q.stream ? setFoco(q.chave) : null)}
             />
           ))}
@@ -121,7 +123,7 @@ function Palco({ visao, canal, pessoas }) {
 
 const falandoDe = (voz, p, eu) => !p.mudo && !p.silenciado && !!voz.falando[p.usuarioId === eu ? 'eu' : p.usuarioId]
 
-function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, aoClicar }) {
+function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, info, aoClicar }) {
   const { p } = q
   const [menu, setMenu] = useState(false)
   const meu = p.usuarioId === eu
@@ -142,6 +144,11 @@ function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, 
         {p.surdo && <Icone nome="fone-off" tamanho={16} />}
       </div>
       {p.silenciado && <span className="etiqueta perigo quadro-etiqueta">silenciado</span>}
+      {info && (
+        <span className="quadro-info" title="O que está chegando desta tela até você">
+          {info}
+        </span>
+      )}
       {!meu && (
         <div className="quadro-moderar" onClick={(e) => e.stopPropagation()}>
           <button

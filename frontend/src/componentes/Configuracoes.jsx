@@ -580,6 +580,17 @@ function Voz() {
         </button>
         {cameraLigada && <video ref={previaCamera} className="previa-camera" autoPlay playsInline muted />}
       </div>
+
+      <h3>Transmissão de tela</h3>
+      <div className="lista-opcoes">
+        <Interruptor
+          rotulo="Usar mais o processador para melhorar a imagem"
+          dica="Comprime a tela com AV1 ou VP9 no processador quando a placa de vídeo não faz isso: mesma imagem com bem menos internet, então engasga menos com várias pessoas assistindo. Pesa no processador; se ele não der conta, o Prosa volta sozinho para a placa de vídeo."
+          ligado={!!voz.telaPotente}
+          aoMudar={(v) => m({ telaPotente: v })}
+        />
+      </div>
+      <p className="dica">Se a sua placa de vídeo já comprime em AV1 ou VP9 (placas recentes da NVIDIA, AMD e Intel), o Prosa usa ela sozinho, sem precisar ligar isto.</p>
     </section>
   )
 }
