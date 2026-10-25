@@ -584,7 +584,10 @@ class Sessao {
     const faixa = this.faixas.tela
     if (modo === 'auto') {
       if (faixa) return this.iniciarAuto()
-    } else this.pararAuto()
+    } else {
+      this.pararAuto()
+      if (faixa) this.iniciarAuto(false) // nos outros modos só mede, para mostrar o que sai
+    }
     if (faixa) {
       const m = modoDaTela(modo)
       faixa.contentHint = m.dica
@@ -606,12 +609,12 @@ class Sessao {
   // estão segurando o vídeo (qualityLimitationReason), desce um degrau; se ficou 8 s sem
   // nenhum limite, sobe. Tela parada manda poucos quadros, e isso não conta como problema.
 
-  iniciarAuto() {
+  iniciarAuto(adaptar = true) {
     this.pararAuto()
     const agora = performance.now()
-    this.auto = { nivel: NIVEL_AUTO_INICIAL, amostras: [], bloqueio: {}, inicio: agora, ultimaTroca: agora }
+    this.auto = { adaptar, nivel: NIVEL_AUTO_INICIAL, amostras: [], bloqueio: {}, inicio: agora, ultimaTroca: agora }
     this.timerAuto = setInterval(() => this.medirTela(), 2000)
-    return this.aplicarNivelAuto()
+    return adaptar ? this.aplicarNivelAuto() : undefined
   }
 
   pararAuto() {
@@ -642,19 +645,26 @@ class Sessao {
       let s = null
       let banda = null // banda que o navegador estima ter para esta conexão
       let codecId = null
+      let fonte = null // quadros por segundo que a captura da tela entrega
       st.forEach((r) => {
         if (r.type === 'outbound-rtp' && r.kind === 'video') codecId = r.codecId
+        if (r.type === 'media-source' && r.kind === 'video' && r.framesPerSecond != null) fonte = r.framesPerSecond
         if (r.type === 'outbound-rtp' && r.kind === 'video')
           s = { fps: r.framesPerSecond || 0, limite: r.qualityLimitationReason || 'none', altura: r.frameHeight || 0, gpu: r.powerEfficientEncoder }
         if (r.type === 'candidate-pair' && r.availableOutgoingBitrate && (r.nominated || r.state === 'succeeded')) banda = Math.max(banda || 0, r.availableOutgoingBitrate)
       })
       if (!s) continue
       s.banda = banda
+      s.fonte = fonte
       s.codec = NOMES_CODEC[st.get(codecId)?.mimeType?.toLowerCase()] || ''
       // o pior envio decide (no modo direto há uma cópia por pessoa)
-      if (!pior || (s.limite !== 'none' && pior.limite === 'none') || (s.banda ?? Infinity) < (pior.banda ?? Infinity)) pior = s
+      if (!pior || (s.limite !== 'none' && pior.limite === 'none') || (s.banda ?? Infinity) < (pior.banda ?? Infinity) || s.fps < pior.fps - 3) pior = s
     }
     if (!pior || this.auto !== a) return
+    if (!a.adaptar) {
+      this.infoTela = this.textoInfoTela(pior, Math.round(pior.fps))
+      return this.aoMudar()
+    }
     a.amostras.push(pior)
     if (a.amostras.length > 6) a.amostras.shift()
     const agora = performance.now()
@@ -669,9 +679,13 @@ class Sessao {
     const faltaBanda = (s) => s.limite === 'bandwidth' && (s.banda == null || s.banda < precisa * 0.7)
     // processador no limite: desce rápido (é o que engasga); banda: só se durar 8 s, porque
     // nas oscilações curtas o próprio codificador já baixa a resolução sozinho
-    const descer = todas(2, (s) => s.limite === 'cpu') || (!medindo && todas(4, faltaBanda))
+    // A tela captura N quadros mas só saem bem menos: o codificador está descartando quadros
+    // porque a banda não cobre essa resolução. O navegador não acusa isso como limite (na
+    // tela ele descarta em vez de baixar a resolução), então o fps baixo é o sinal.
+    const perdendo = (s) => s.fonte != null && s.fonte >= 12 && s.fps < s.fonte * 0.8 && s.fonte - s.fps >= 4
+    const descer = todas(2, (s) => s.limite === 'cpu') || (!medindo && (todas(4, faltaBanda) || todas(3, perdendo)))
     const acima = a.nivel > 0 ? NIVEIS_AUTO[a.nivel - 1].bitrate : 0
-    const folga = (s) => s.limite !== 'cpu' && !faltaBanda(s) && (s.banda == null || s.banda >= acima * 0.8)
+    const folga = (s) => s.limite !== 'cpu' && !faltaBanda(s) && !perdendo(s) && (s.banda == null || s.banda >= acima * 0.8)
     let novo = a.nivel
     // processador não deu conta do codec pesado: antes de baixar a qualidade, volta para o
     // H.264 da placa de vídeo (ou o padrão)
@@ -698,11 +712,16 @@ class Sessao {
       await this.aplicarNivelAuto()
     }
     const fps = Math.round(pior.fps)
-    // quem codifica: a placa de vídeo (leve) ou o processador (pesa, ainda mais com várias cópias)
-    const quem = pior.gpu === true ? 'na placa de vídeo' : pior.gpu === false ? 'no processador' : ''
-    const codec = [pior.codec, quem].filter(Boolean).join(' ')
-    this.infoTela = `${pior.altura ? `${pior.altura}p · ` : ''}até ${NIVEIS_AUTO[a.nivel].fps} fps${fps ? ` (agora ${fps})` : ''}${codec ? ` · ${codec}` : ''}`
+    this.infoTela = this.textoInfoTela(pior, `até ${NIVEIS_AUTO[a.nivel].fps} fps${fps ? ` (agora ${fps})` : ''}`)
     this.aoMudar()
+  }
+
+  textoInfoTela(s, fps) {
+    // quem codifica: a placa de vídeo (leve) ou o processador (pesa, ainda mais com várias cópias)
+    const quem = s.gpu === true ? 'na placa de vídeo' : s.gpu === false ? 'no processador' : ''
+    const codec = [s.codec, quem].filter(Boolean).join(' ')
+    const f = typeof fps === 'number' ? `${fps} fps` : fps
+    return [s.altura ? `${s.altura}p` : '', f, codec].filter(Boolean).join(' · ')
   }
 
   async trocarFaixa(tipo, faixa) {
@@ -925,7 +944,7 @@ export function VozProvider({ children }) {
         s.codecTela = await escolherCodecTela(!!preferencias().voz.telaPotente)
         await s.trocarFaixa('tela', faixa)
         await s.trocarFaixa('telaAudio', som)
-        if (s.modoTela === 'auto') await s.iniciarAuto()
+        await s.iniciarAuto(s.modoTela === 'auto')
         setEstado((e) => ({ ...e, telaComSom: !!som }))
       }
       s.enviarEstado()

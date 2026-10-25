@@ -267,8 +267,8 @@ export function Controles({ perm, compacto }) {
               {r}
             </button>
           ))}
-          {voz.modoTela === 'auto' && voz.infoTela && (
-            <span className="info-tela" title="O que sua tela está enviando agora (o automático ajusta sozinho)">
+          {voz.infoTela && (
+            <span className="info-tela" title="O que sua tela está enviando agora">
               {voz.infoTela}
             </span>
           )}
