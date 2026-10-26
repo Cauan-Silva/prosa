@@ -4,8 +4,7 @@
 
 Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go e React: canais de texto e de voz, cargos com permissões por canal, moderação, convites, menções, reações, anexos e busca. A voz vai direto entre os navegadores em salas pequenas e passa por um servidor de mídia próprio (SFU com o Pion) nas grandes, com câmera e compartilhamento de tela, e o servidor roda em várias instâncias ao mesmo tempo usando o Redis para combinar tudo.
 
-<!-- Depois de publicar, troque pelo seu link: -->
-<!-- **Ver online:** https://prosa.onrender.com (o plano gratuito pode levar ~1 minuto para acordar) -->
+**Ver online:** https://prosa-s4u4.onrender.com (o plano gratuito pode levar ~1 minuto para acordar) · **[Baixar para Windows](https://github.com/Cauan-Silva/prosa/releases/latest)**
 
 ## O que tem aqui
 
@@ -32,7 +31,10 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - **Modo lento** por canal e limite de mensagens por pessoa contra flood
 
 **Voz**
-- Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas; a tela tem os modos Nítido (mais resolução), Fluido (30 fps) e 60 fps (para jogos e vídeos)
+- Salas de voz com **microfone, câmera e compartilhamento de tela com som**, até 25 pessoas. Até 5 pessoas a mídia vai **direto entre os computadores** (sem passar pelo servidor); acima disso passa pelo SFU
+- Tela em até **1080p e 60 fps**, no modo **Automático** (lê as estatísticas do WebRTC a cada 2 s e sobe ou desce resolução e fps conforme o processador e a internet, inclusive quando o codificador começa a descartar quadros) ou nos modos Nítido, Fluido e 60 fps
+- **Codec escolhido pelo hardware**: AV1 ou VP9 quando a placa de vídeo comprime nesses formatos (bem menos banda que o H.264), H.264 da placa de vídeo nos outros casos, e a opção de usar o processador para o AV1. Cada pessoa recebe num codec que consegue abrir
+- Quem assiste segura um pouco de vídeo (*jitter buffer*) para a imagem não engasgar quando a internet oscila, e vê o que está chegando (resolução, fps, perda de pacotes)
 - Quem está falando acende; dá para silenciar o microfone ou o som, e moderadores silenciam ou tiram alguém da sala
 - **Volume por pessoa** (0 a 200%) e da tela de cada um, e silenciar alguém só para você
 - A voz continua enquanto você navega pelos canais de texto
