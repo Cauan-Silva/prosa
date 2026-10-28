@@ -89,6 +89,7 @@ function Palco({ visao, canal, pessoas }) {
               falando={falandoDe(voz, focado.p, eu)}
               nome={nomeDe(membros?.find((m) => m.usuarioId === focado.p.usuarioId)) || focado.p.nome}
               avatar={membros?.find((m) => m.usuarioId === focado.p.usuarioId)?.avatar}
+              moldura={membros?.find((m) => m.usuarioId === focado.p.usuarioId)?.visual?.moldura}
               eu={eu}
               moderador={moderador && focado.p.usuarioId !== eu}
               aoModerar={voz.moderar}
@@ -107,6 +108,7 @@ function Palco({ visao, canal, pessoas }) {
               falando={falandoDe(voz, q.p, eu)}
               nome={nomeDe(membros?.find((m) => m.usuarioId === q.p.usuarioId)) || q.p.nome}
               avatar={membros?.find((m) => m.usuarioId === q.p.usuarioId)?.avatar}
+              moldura={membros?.find((m) => m.usuarioId === q.p.usuarioId)?.visual?.moldura}
               moderador={moderador && q.p.usuarioId !== eu}
               aoModerar={voz.moderar}
               prefsVoz={prefs.voz}
@@ -123,7 +125,7 @@ function Palco({ visao, canal, pessoas }) {
 
 const falandoDe = (voz, p, eu) => !p.mudo && !p.silenciado && !!voz.falando[p.usuarioId === eu ? 'eu' : p.usuarioId]
 
-function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, info, aoClicar }) {
+function Quadro({ q, nome, avatar, moldura, falando, eu, moderador, aoModerar, prefsVoz, info, aoClicar }) {
   const { p } = q
   const [menu, setMenu] = useState(false)
   const meu = p.usuarioId === eu
@@ -133,7 +135,7 @@ function Quadro({ q, nome, avatar, falando, eu, moderador, aoModerar, prefsVoz, 
   const volume = Math.round((prefsVoz?.volumes?.[chave] ?? 1) * 100)
   return (
     <div className={`quadro ${falando ? 'falando' : ''} ${q.stream ? 'com-video' : ''}`} onClick={aoClicar}>
-      {q.stream ? <Video stream={q.stream} espelhar={p.usuarioId === eu && !q.tela} /> : <Avatar nome={nome} id={p.usuarioId} src={avatar} tamanho={72} />}
+      {q.stream ? <Video stream={q.stream} espelhar={p.usuarioId === eu && !q.tela} /> : <Avatar nome={nome} id={p.usuarioId} src={avatar} moldura={moldura} tamanho={72} />}
       <div className="quadro-rodape">
         <span>
           {nome}

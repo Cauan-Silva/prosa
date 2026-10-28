@@ -1,3 +1,5 @@
+import { Moldura } from './Visual.jsx'
+
 // Cada servidor ganha um azulejo próprio, desenhado a partir do nome: o mesmo nome
 // sempre gera o mesmo desenho. É a "cara" do servidor na barra lateral.
 
@@ -83,14 +85,15 @@ export function iniciais(nome) {
 
 const coresAvatar = ['#1f3fa6', '#14635a', '#9c2f4a', '#5a2d82', '#b5540f', '#2b6f8f', '#7a5a00', '#3d4a6b']
 
-export function Avatar({ nome, id, tamanho = 36, online, src, status }) {
+export function Avatar({ nome, id, tamanho = 36, online, src, status, moldura }) {
   let h = semente(`pessoa:${id ?? nome}`)
   h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0
   const a = coresAvatar[(h >>> 7) % coresAvatar.length]
   const ponto = online === undefined ? null : !online || status === 'invisivel' ? 'off' : status || 'online'
   return (
-    <span className="avatar" style={{ width: tamanho, height: tamanho, background: src ? 'var(--linha)' : a, fontSize: tamanho * 0.38 }}>
+    <span className={`avatar ${moldura && tamanho >= 28 ? 'com-moldura' : ''}`} style={{ width: tamanho, height: tamanho, background: src ? 'var(--linha)' : a, fontSize: tamanho * 0.38, '--tam': `${tamanho}px` }}>
       {src ? <img src={src} alt="" loading="lazy" draggable="false" /> : iniciais(nome)}
+      {tamanho >= 28 && <Moldura id={moldura} />}
       {ponto && <span className={`ponto-online ${ponto}`} aria-label={ROTULOS[ponto]} title={ROTULOS[ponto]} />}
     </span>
   )

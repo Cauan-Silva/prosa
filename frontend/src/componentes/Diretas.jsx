@@ -75,7 +75,7 @@ export function BarraDiretas({ canalId, aoAbrir, aoEscolher }) {
                   aria-current={ativo ? 'page' : undefined}
                 >
                   {c.tipo === 'dm' ? (
-                    <Avatar nome={canal.nome} id={outro?.id} src={outro?.avatar} status={outro?.status} tamanho={32} online={!!estado.online[0]?.[outro?.id] || !!outro?.online} />
+                    <Avatar nome={canal.nome} id={outro?.id} src={outro?.avatar} moldura={outro?.visual?.moldura} status={outro?.status} tamanho={32} online={!!estado.online[0]?.[outro?.id] || !!outro?.online} />
                   ) : (
                     <span className="avatar avatar-grupo" style={{ width: 32, height: 32 }}>
                       <Icone nome="pessoas" tamanho={18} />
@@ -311,7 +311,7 @@ function Amigo({ p, aba, estaOnline, acao, despachar }) {
   return (
     <li className="amigo">
       <button className="amigo-pessoa" onClick={() => abrirPerfil(p.id)}>
-        <Avatar nome={p.nomeExibicao} id={p.id} src={p.avatar} status={p.status} tamanho={36} online={ehAmigo ? estaOnline : undefined} />
+        <Avatar nome={p.nomeExibicao} id={p.id} src={p.avatar} moldura={p.visual?.moldura} status={p.status} tamanho={36} online={ehAmigo ? estaOnline : undefined} />
         <span>
           <strong>{p.nomeExibicao}</strong>
           <small>

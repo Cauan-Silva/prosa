@@ -40,21 +40,22 @@ func NovoServico(db *sql.DB, pub eventos.Publicador, pres presenca.Registro) *Se
 
 // Pessoa é o resumo de alguém nas listas de amigos e nas conversas.
 type Pessoa struct {
-	ID           int64  `json:"id"`
-	NomeUsuario  string `json:"nomeUsuario"`
-	NomeExibicao string `json:"nomeExibicao"`
-	Avatar       string `json:"avatar"`
-	Status       string `json:"status"`
-	StatusTexto  string `json:"statusTexto"`
-	StatusEmoji  string `json:"statusEmoji"`
-	Online       bool   `json:"online"`
+	ID           int64           `json:"id"`
+	NomeUsuario  string          `json:"nomeUsuario"`
+	NomeExibicao string          `json:"nomeExibicao"`
+	Avatar       string          `json:"avatar"`
+	Status       string          `json:"status"`
+	StatusTexto  string          `json:"statusTexto"`
+	StatusEmoji  string          `json:"statusEmoji"`
+	Online       bool            `json:"online"`
+	Visual       usuarios.Visual `json:"visual"`
 }
 
-const colunasPessoa = `u.id, u.nome_usuario, u.nome_exibicao, u.avatar, u.status, u.status_texto, u.status_emoji`
+const colunasPessoa = `u.id, u.nome_usuario, u.nome_exibicao, u.avatar, u.status, u.status_texto, u.status_emoji, u.visual`
 
 func lerPessoa(l interface{ Scan(...any) error }, extras ...any) (Pessoa, error) {
 	var p Pessoa
-	err := l.Scan(append([]any{&p.ID, &p.NomeUsuario, &p.NomeExibicao, &p.Avatar, &p.Status, &p.StatusTexto, &p.StatusEmoji}, extras...)...)
+	err := l.Scan(append([]any{&p.ID, &p.NomeUsuario, &p.NomeExibicao, &p.Avatar, &p.Status, &p.StatusTexto, &p.StatusEmoji, &p.Visual}, extras...)...)
 	p.Avatar = usuarios.URLImagem(p.Avatar)
 	return p, err
 }

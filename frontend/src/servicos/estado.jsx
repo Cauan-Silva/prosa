@@ -114,7 +114,7 @@ function reducer(estado, a) {
       const d = a.d
       const campos = {
         nomeExibicao: d.nomeExibicao, avatar: d.avatar, corPerfil: d.corPerfil,
-        status: d.status, statusTexto: d.statusTexto, statusEmoji: d.statusEmoji,
+        status: d.status, statusTexto: d.statusTexto, statusEmoji: d.statusEmoji, visual: d.visual,
       }
       const membros = {}
       for (const [sid, lista] of Object.entries(estado.membros)) {

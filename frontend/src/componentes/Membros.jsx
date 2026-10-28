@@ -1,3 +1,4 @@
+import { NomeEstilizado } from './Visual.jsx'
 import { useState } from 'react'
 import { Avatar } from './Azulejo.jsx'
 import CartaoMembro from './CartaoMembro.jsx'
@@ -28,9 +29,15 @@ export default function Membros({ visao }) {
     return (
       <li key={m.usuarioId}>
         <button className={`membro ${estaOnline ? '' : 'offline'}`} onClick={() => setAberto(m.usuarioId)}>
-          <Avatar nome={m.nomeExibicao} id={m.usuarioId} src={m.avatar} status={m.usuarioId === estado.eu.id ? estado.eu.status : m.status} tamanho={32} online={estaOnline} />
+          <Avatar nome={m.nomeExibicao} id={m.usuarioId} src={m.avatar} moldura={m.visual?.moldura} status={m.usuarioId === estado.eu.id ? estado.eu.status : m.status} tamanho={32} online={estaOnline} />
           <span className="membro-nomes">
-            <span style={cor ? { color: cor } : undefined}>{nomeDe(m)}</span>
+            {m.visual?.nome ? (
+              <NomeEstilizado estilo={m.visual.nome} tema={m.visual.tema}>
+                {nomeDe(m)}
+              </NomeEstilizado>
+            ) : (
+              <span style={cor ? { color: cor } : undefined}>{nomeDe(m)}</span>
+            )}
             {estaOnline && (m.statusTexto || m.statusEmoji) && (
               <small>
                 {m.statusEmoji} {m.statusTexto}

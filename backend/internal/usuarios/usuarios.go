@@ -161,10 +161,10 @@ func (s *Servico) Buscar(ctx context.Context, id int64) (Usuario, error) {
 	var prefs []byte
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, nome_usuario, nome_exibicao, email, criado_em, avatar, banner, cor_perfil, bio, pronomes,
-		       status, status_texto, status_emoji, preferencias
+		       status, status_texto, status_emoji, preferencias, visual
 		FROM usuarios WHERE id = $1`, id).
 		Scan(&u.ID, &u.NomeUsuario, &u.NomeExibicao, &u.Email, &u.CriadoEm, &avatar, &banner, &u.CorPerfil, &u.Bio,
-			&u.Pronomes, &u.Status, &u.StatusTexto, &u.StatusEmoji, &prefs)
+			&u.Pronomes, &u.Status, &u.StatusTexto, &u.StatusEmoji, &prefs, &u.Visual)
 	if errors.Is(err, sql.ErrNoRows) {
 		return u, api.NovoErro(http.StatusUnauthorized, "Conta não encontrada. Entre de novo.")
 	}

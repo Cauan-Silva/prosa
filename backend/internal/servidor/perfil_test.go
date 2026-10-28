@@ -156,3 +156,68 @@ func TestPerfil(t *testing.T) {
 		t.Errorf("avatar não saiu: %v", eu["avatar"])
 	}
 }
+
+func TestVisualDoPerfil(t *testing.T) {
+	srv, _ := ambiente(t)
+	ana := cadastrar(t, srv.URL, "ana")
+	bia := cadastrar(t, srv.URL, "bia")
+	var v visao
+	ana.esperar(201, "POST", "/api/servidores", map[string]string{"nome": "Visual"}, &v)
+	var geral int64
+	for _, c := range v.Canais {
+		if c.Tipo == "texto" {
+			geral = c.ID
+		}
+	}
+	var conv struct {
+		Codigo string `json:"codigo"`
+	}
+	ana.esperar(201, "POST", fmt.Sprintf("/api/servidores/%d/canais/%d/convites", v.Servidor.ID, geral), map[string]int{}, &conv)
+	bia.esperar(200, "POST", "/api/convites/"+conv.Codigo, nil, nil)
+	wa := conectar(t, srv.URL, ana.token)
+	wa.esperar("PRONTO", nil)
+
+	visual := map[string]any{"moldura": "neon", "efeito": "neve", "tema": []int{0x1f3fa6, 0xd63a7a}, "nome": "gradiente"}
+	var eu map[string]any
+	bia.esperar(200, "PATCH", "/api/eu", map[string]any{"visual": visual}, &eu)
+	vis, _ := eu["visual"].(map[string]any)
+	if vis["moldura"] != "neon" || vis["efeito"] != "neve" || vis["nome"] != "gradiente" || len(vis["tema"].([]any)) != 2 {
+		t.Fatalf("visual não salvo: %v", eu["visual"])
+	}
+	// mudar outro campo não apaga o visual
+	bia.esperar(200, "PATCH", "/api/eu", map[string]any{"bio": "oi"}, &eu)
+	if eu["visual"].(map[string]any)["moldura"] != "neon" {
+		t.Fatalf("visual sumiu ao salvar a bio: %v", eu["visual"])
+	}
+	alt := wa.esperar("USUARIO_ALTERADO", nil)
+	if !strings.Contains(string(alt.Dados), `"moldura":"neon"`) {
+		t.Fatalf("evento sem o visual: %s", alt.Dados)
+	}
+	// aparece para os outros: lista de membros e perfil público
+	var membros []map[string]any
+	ana.esperar(200, "GET", fmt.Sprintf("/api/servidores/%d/membros", v.Servidor.ID), nil, &membros)
+	achou := false
+	for _, m := range membros {
+		if m["nomeUsuario"] == "bia" {
+			achou = m["visual"].(map[string]any)["moldura"] == "neon"
+		}
+	}
+	if !achou {
+		t.Fatal("lista de membros sem a moldura")
+	}
+	var perfil map[string]any
+	ana.esperar(200, "GET", fmt.Sprintf("/api/usuarios/%v", eu["id"]), nil, &perfil)
+	if perfil["visual"].(map[string]any)["efeito"] != "neve" {
+		t.Fatalf("perfil público sem o efeito: %v", perfil["visual"])
+	}
+	// nomes que não existem e cores fora da faixa são recusados
+	bia.esperar(400, "PATCH", "/api/eu", map[string]any{"visual": map[string]any{"moldura": "<script>"}}, nil)
+	bia.esperar(400, "PATCH", "/api/eu", map[string]any{"visual": map[string]any{"efeito": "tremor"}}, nil)
+	bia.esperar(400, "PATCH", "/api/eu", map[string]any{"visual": map[string]any{"tema": []int{1, 2, 3}}}, nil)
+	bia.esperar(400, "PATCH", "/api/eu", map[string]any{"visual": map[string]any{"tema": []int{0x1000000, 0}}}, nil)
+	// tirar tudo volta ao padrão
+	bia.esperar(200, "PATCH", "/api/eu", map[string]any{"visual": map[string]any{}}, &eu)
+	if len(eu["visual"].(map[string]any)) != 0 {
+		t.Fatalf("visual não foi limpo: %v", eu["visual"])
+	}
+}

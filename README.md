@@ -40,7 +40,8 @@ Servidores de conversa em tempo real, no estilo do Discord, feitos do zero em Go
 - A voz continua enquanto você navega pelos canais de texto
 
 **Perfil e configurações**
-- **Perfil** com foto, banner, cor, pronomes, “sobre mim” e status (online, ausente, não perturbe, invisível) com texto e emoji; quem divide servidor com você vê o cartão completo ao clicar no seu nome
+- **Perfil** com foto e banner (inclusive **GIF animado**), cor, pronomes, “sobre mim” e status (online, ausente, não perturbe, invisível) com texto e emoji; quem divide servidor com você vê o cartão completo ao clicar no seu nome
+- **Personalização do perfil**: 12 **molduras** animadas para a foto (neon, arco-íris, ouro, chamas, pixel, fones…), 10 **efeitos** no cartão (neve, confete, fogos, aurora, código…), **tema** de duas cores no cartão e **estilo do nome** (gradiente, neon, arco-íris, ouro, glitch), com prévia ao vivo
 - **Aparência**: 9 temas (Azulejo, Meia-noite, Neon, Grafite, Floresta, Café, Rosa, Alto contraste…), qualquer cor de destaque, 5 fontes, tamanho da interface, mensagens compactas e cantos retos. Fica salvo na conta e vale em qualquer navegador
 - **Voz e vídeo**: escolha de microfone, saída e câmera, teste de microfone com medidor, **supressão de ruído com IA** (RNNoise rodando num AudioWorklet), supressão de eco, **filtro de ruído (portão)** com sensibilidade ajustável e **pressionar para falar** com tecla configurável
 - **Notificações do sistema** e **sons** da interface, com volume; o status “não perturbe” silencia tudo

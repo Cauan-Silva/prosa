@@ -209,7 +209,7 @@ export function Rodape({ aoAbrir }) {
         </div>
       )}
       <button className="rodape-eu" onClick={() => setMenu((m) => !m)} aria-expanded={menu} title="Seu status e perfil">
-        <Avatar nome={eu.nomeExibicao} id={eu.id} src={eu.avatar} status={eu.status} tamanho={34} online />
+        <Avatar nome={eu.nomeExibicao} id={eu.id} src={eu.avatar} moldura={eu.visual?.moldura} status={eu.status} tamanho={34} online />
         <span>
           <strong>{eu.nomeExibicao}</strong>
           <small>{eu.statusTexto ? `${eu.statusEmoji || ''} ${eu.statusTexto}`.trim() : `@${eu.nomeUsuario}`}</small>

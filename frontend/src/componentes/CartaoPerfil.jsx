@@ -1,17 +1,27 @@
 import { Avatar } from './Azulejo.jsx'
+import { Efeito, NomeEstilizado } from './Visual.jsx'
 import { corHex, formatarDia } from '../servicos/formato.js'
+import { hex, temaEscuro } from '../servicos/visual.js'
 
 const STATUS = { online: 'Online', ausente: 'Ausente', ocupado: 'Não perturbe', invisivel: 'Invisível' }
 
 /** O cartão de perfil (banner, foto, nome, status e "sobre mim"), igual para todo mundo. */
 export default function CartaoPerfil({ perfil, online, apelido, desde, children }) {
   const cor = corHex(perfil.corPerfil) || 'var(--cobalto)'
+  const v = perfil.visual || {}
+  const tema = v.tema?.length === 2 ? v.tema : null
+  const estilo = { '--cor-perfil': tema ? hex(tema[0]) : cor }
+  if (tema) {
+    estilo['--tema1'] = hex(tema[0])
+    estilo['--tema2'] = hex(tema[1])
+  }
+  const classeTema = tema ? `com-tema ${temaEscuro(tema) ? 'tema-escuro' : 'tema-claro'}` : ''
   return (
-    <div className="cartao-perfil" style={{ '--cor-perfil': cor }}>
+    <div className={`cartao-perfil ${classeTema}`} style={estilo}>
       <div className="perfil-banner" style={perfil.banner ? { backgroundImage: `url(${perfil.banner})` } : undefined} />
       <div className="perfil-cabeca">
         <span className="perfil-foto">
-          <Avatar nome={perfil.nomeExibicao} id={perfil.usuarioId ?? perfil.id} src={perfil.avatar} tamanho={88} online={online} status={perfil.status} />
+          <Avatar nome={perfil.nomeExibicao} id={perfil.usuarioId ?? perfil.id} src={perfil.avatar} moldura={v.moldura} tamanho={88} online={online} status={perfil.status} />
         </span>
         {(perfil.statusTexto || perfil.statusEmoji) && (
           <span className="perfil-balao">
@@ -20,7 +30,9 @@ export default function CartaoPerfil({ perfil, online, apelido, desde, children 
         )}
       </div>
       <div className="perfil-corpo">
-        <h3>{apelido || perfil.nomeExibicao}</h3>
+        <NomeEstilizado como="h3" estilo={v.nome} tema={v.tema}>
+          {apelido || perfil.nomeExibicao}
+        </NomeEstilizado>
         <p className="perfil-usuario">
           @{perfil.nomeUsuario}
           {perfil.pronomes && <span> — {perfil.pronomes}</span>}
@@ -54,6 +66,7 @@ export default function CartaoPerfil({ perfil, online, apelido, desde, children 
         )}
         {children}
       </div>
+      <Efeito id={v.efeito} />
     </div>
   )
 }

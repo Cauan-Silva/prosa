@@ -3,6 +3,9 @@ import { recortar } from '../servicos/imagem.js'
 import Modal from './Modal.jsx'
 import Icone from './Icone.jsx'
 import CartaoPerfil from './CartaoPerfil.jsx'
+import { Avatar } from './Azulejo.jsx'
+import { Efeito, NomeEstilizado } from './Visual.jsx'
+import { EFEITOS, ESTILOS_NOME, MOLDURAS, TEMAS as TEMAS_PERFIL, hex } from '../servicos/visual.js'
 import { nomeTecla } from './SalaVoz.jsx'
 import { RAPIDOS } from './Mensagem.jsx'
 import { api, enviarImagemPerfil } from '../servicos/api.js'
@@ -146,10 +149,18 @@ function Perfil() {
   const [campos, setCampos] = useState({
     bio: eu.bio || '', pronomes: eu.pronomes || '', corPerfil: eu.corPerfil || 0,
     status: eu.status || 'online', statusTexto: eu.statusTexto || '', statusEmoji: eu.statusEmoji || '',
+    visual: eu.visual || {},
   })
   const [msg, setMsg] = useState('')
   const [enviando, setEnviando] = useState('')
-  const mudou = Object.entries(campos).some(([k, v]) => (eu[k] ?? '') !== v && !(k === 'corPerfil' && !eu[k] && !v))
+  const mudou = Object.entries(campos).some(([k, v]) =>
+    k === 'visual' ? JSON.stringify(v) !== JSON.stringify(eu.visual || {}) : (eu[k] ?? '') !== v && !(k === 'corPerfil' && !eu[k] && !v),
+  )
+  const mudarVisual = (x) => {
+    const novo = { ...campos.visual, ...x }
+    for (const k of Object.keys(novo)) if (!novo[k] || (Array.isArray(novo[k]) && !novo[k].length)) delete novo[k]
+    setCampos({ ...campos, visual: novo })
+  }
   const mudarCampo = (k) => (e) => setCampos({ ...campos, [k]: e.target.value })
 
   async function salvar() {
@@ -167,7 +178,14 @@ function Perfil() {
     setMsg('')
     setEnviando(campo)
     try {
-      const blob = campo === 'avatar' ? await recortar(arquivo, 256, 256) : await recortar(arquivo, 960, 360)
+      // GIF animado vai como está (até 4 MB na foto e 8 MB no banner) para não perder a animação
+      const limite = campo === 'avatar' ? 4 << 20 : 8 << 20
+      if (arquivo.type === 'image/gif' && arquivo.size > limite)
+        throw new Error(`Esse GIF tem ${(arquivo.size / 1048576).toFixed(1)} MB. Use um de até ${limite >> 20} MB para ele continuar animado.`)
+      const blob =
+        campo === 'avatar'
+          ? await recortar(arquivo, 256, 256, { manterGif: true, limiteGif: limite })
+          : await recortar(arquivo, 960, 360, { manterGif: true, limiteGif: limite })
       despachar({ tipo: 'eu', usuario: await enviarImagemPerfil(campo, blob) })
     } catch (e) {
       setMsg(e.message || 'Não foi possível usar essa imagem.')
@@ -254,6 +272,7 @@ function Perfil() {
               <input value={campos.statusTexto} onChange={mudarCampo('statusTexto')} maxLength={80} placeholder="ex.: jogando, estudando, no trabalho" />
             </div>
           </label>
+          <Personalizacao eu={eu} visual={campos.visual} aoMudar={mudarVisual} />
           <div className="botoes">
             <button className="botao primario" onClick={salvar} disabled={!mudou}>
               Salvar perfil
@@ -267,6 +286,87 @@ function Perfil() {
         </div>
       </div>
     </section>
+  )
+}
+
+// Moldura, efeito, tema e estilo do nome: tudo aparece na prévia ao lado na hora.
+function Personalizacao({ eu, visual, aoMudar }) {
+  const tema = visual.tema?.length === 2 ? visual.tema : null
+  return (
+    <div className="personalizacao">
+      <h3>Personalização</h3>
+      <p className="dica">Foto e banner podem ser GIF animado (até 4 MB e 8 MB). O resto aparece para todo mundo no seu cartão e na lista de membros.</p>
+
+      <fieldset>
+        <legend>Moldura da foto</legend>
+        <div className="grade-visual">
+          {MOLDURAS.map(([id, nome]) => (
+            <button key={id || 'nenhuma'} type="button" className="opcao-visual" aria-pressed={(visual.moldura || '') === id} onClick={() => aoMudar({ moldura: id })}>
+              <span className="opcao-visual-amostra">
+                <Avatar nome={eu.nomeExibicao} id={eu.id} src={eu.avatar} moldura={id} tamanho={44} />
+              </span>
+              {nome}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Efeito do perfil</legend>
+        <div className="grade-visual">
+          {EFEITOS.map(([id, nome]) => (
+            <button key={id || 'nenhum'} type="button" className="opcao-visual" aria-pressed={(visual.efeito || '') === id} onClick={() => aoMudar({ efeito: id })}>
+              <span className="opcao-visual-amostra efeito-amostra">
+                <Efeito id={id} />
+              </span>
+              {nome}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tema do cartão</legend>
+        <div className="temas-perfil">
+          <button type="button" className="tema-perfil sem" aria-pressed={!tema} onClick={() => aoMudar({ tema: [] })} aria-label="Sem tema" title="Sem tema">
+            ×
+          </button>
+          {TEMAS_PERFIL.map((t) => (
+            <button
+              key={t.join('-')}
+              type="button"
+              className="tema-perfil"
+              style={{ background: `linear-gradient(160deg, ${hex(t[0])}, ${hex(t[1])})` }}
+              aria-pressed={!!tema && tema[0] === t[0] && tema[1] === t[1]}
+              aria-label={`Tema ${hex(t[0])} e ${hex(t[1])}`}
+              onClick={() => aoMudar({ tema: t })}
+            />
+          ))}
+          <label className="tema-cor" title="Cor de cima">
+            <input type="color" value={hex(tema?.[0] ?? 0x1f3fa6)} onChange={(e) => aoMudar({ tema: [parseInt(e.target.value.slice(1), 16), tema?.[1] ?? 0x0b1430] })} aria-label="Cor de cima do tema" />
+          </label>
+          <label className="tema-cor" title="Cor de baixo">
+            <input type="color" value={hex(tema?.[1] ?? 0x0b1430)} onChange={(e) => aoMudar({ tema: [tema?.[0] ?? 0x1f3fa6, parseInt(e.target.value.slice(1), 16)] })} aria-label="Cor de baixo do tema" />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Estilo do nome</legend>
+        <div className="grade-visual nomes">
+          {ESTILOS_NOME.map(([id, nome]) => (
+            <button key={id || 'normal'} type="button" className="opcao-visual" aria-pressed={(visual.nome || '') === id} onClick={() => aoMudar({ nome: id })}>
+              <span className="opcao-visual-amostra">
+                <NomeEstilizado estilo={id} tema={visual.tema}>
+                  {eu.nomeExibicao.split(' ')[0]}
+                </NomeEstilizado>
+              </span>
+              {nome}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    </div>
   )
 }
 

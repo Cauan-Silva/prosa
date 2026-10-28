@@ -14,6 +14,7 @@ import (
 	"github.com/Cauan-Silva/prosa/internal/api"
 	"github.com/Cauan-Silva/prosa/internal/arquivos"
 	"github.com/Cauan-Silva/prosa/internal/eventos"
+	"github.com/Cauan-Silva/prosa/internal/usuarios"
 )
 
 type Servico struct {
@@ -79,11 +80,12 @@ type Membro struct {
 	CastigadoAte *time.Time `json:"castigadoAte,omitempty"`
 	EntrouEm     time.Time  `json:"entrouEm"`
 	// perfil (o resto — bio, banner, pronomes — vem em GET /api/usuarios/{id})
-	Avatar      string `json:"avatar"`
-	CorPerfil   int    `json:"corPerfil"`
-	Status      string `json:"status"`
-	StatusTexto string `json:"statusTexto"`
-	StatusEmoji string `json:"statusEmoji"`
+	Avatar      string          `json:"avatar"`
+	CorPerfil   int             `json:"corPerfil"`
+	Status      string          `json:"status"`
+	StatusTexto string          `json:"statusTexto"`
+	StatusEmoji string          `json:"statusEmoji"`
+	Visual      usuarios.Visual `json:"visual"`
 }
 
 // ---- utilidades ----

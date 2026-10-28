@@ -125,7 +125,7 @@ function Mensagem({ m, junto, visao, canal, membros, editando, aoEditar, aoRespo
           </time>
         ) : (
           <button className="autor-foto" onClick={() => m.autor && abrirPerfil(m.autor.id)} aria-label={`Perfil de ${nome}`}>
-            <Avatar nome={nome} id={m.autor?.id ?? 0} src={membro?.avatar} tamanho={40} />
+            <Avatar nome={nome} id={m.autor?.id ?? 0} src={membro?.avatar} moldura={membro?.visual?.moldura} tamanho={40} />
           </button>
         )}
         <div className="mensagem-corpo">

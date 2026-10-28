@@ -31,6 +31,7 @@ type Perfil struct {
 	Status      string `json:"status"` // online, ausente, ocupado (invisível aparece como offline)
 	StatusTexto string `json:"statusTexto"`
 	StatusEmoji string `json:"statusEmoji"`
+	Visual      Visual `json:"visual"`
 }
 
 // Imagens de perfil ficam em "perfis/<usuario>/<aleatório>" e são servidas sem login em
@@ -55,6 +56,7 @@ type pedidoPerfil struct {
 	Status       *string `json:"status"`
 	StatusTexto  *string `json:"statusTexto"`
 	StatusEmoji  *string `json:"statusEmoji"`
+	Visual       *Visual `json:"visual"`
 }
 
 func limpar(texto string, max int, campo string) (string, error) {
@@ -112,6 +114,12 @@ func (s *Servico) AlterarPerfil(w http.ResponseWriter, r *http.Request) error {
 		}
 		novo.CorPerfil = *p.CorPerfil
 	}
+	if p.Visual != nil {
+		if err := p.Visual.Validar(); err != nil {
+			return err
+		}
+		novo.Visual = *p.Visual
+	}
 	if p.Status != nil {
 		if !statusValidos[*p.Status] {
 			return api.NovoErro(http.StatusBadRequest, "Status inválido.")
@@ -120,9 +128,9 @@ func (s *Servico) AlterarPerfil(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, err := s.db.ExecContext(r.Context(), `
 		UPDATE usuarios SET nome_exibicao = $2, bio = $3, pronomes = $4, cor_perfil = $5, status = $6,
-		       status_texto = $7, status_emoji = $8
+		       status_texto = $7, status_emoji = $8, visual = $9
 		WHERE id = $1`, eu, novo.NomeExibicao, novo.Bio, novo.Pronomes, novo.CorPerfil, novo.Status,
-		novo.StatusTexto, novo.StatusEmoji); err != nil {
+		novo.StatusTexto, novo.StatusEmoji, novo.Visual); err != nil {
 		return err
 	}
 	if (antes.Status == "invisivel") != (novo.Status == "invisivel") && s.AoMudarStatus != nil {
