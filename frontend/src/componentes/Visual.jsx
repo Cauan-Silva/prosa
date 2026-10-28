@@ -17,7 +17,7 @@ const PIXELS = (() => {
   for (let y = 0; y < 20; y++)
     for (let x = 0; x < 20; x++) {
       const d = Math.hypot(x + 0.5 - 10, y + 0.5 - 10)
-      if (d >= 8.4 && d < 10) lista.push([x, y, (x + y) % 3])
+      if (d >= 9 && d < 10) lista.push([x, y, (x + y) % 3])
     }
   return lista
 })()
@@ -69,15 +69,15 @@ export const Moldura = memo(function Moldura({ id }) {
   else if (id === 'orbita') extra = <i className="moldura-planeta" />
   else if (id === 'fones')
     extra = (
-      <svg className="moldura-fones" viewBox="0 0 100 100">
-        <path d="M14 58a36 36 0 0 1 72 0" fill="none" strokeWidth="7" strokeLinecap="round" />
+      <svg className="moldura-fones-svg" viewBox="0 0 100 100">
+        <path d="M14 58a36 36 0 0 1 72 0" fill="none" strokeWidth="5" strokeLinecap="round" />
         <rect x="4" y="50" width="16" height="30" rx="7" />
         <rect x="80" y="50" width="16" height="30" rx="7" />
       </svg>
     )
   else if (id === 'coroa')
     extra = (
-      <svg className="moldura-coroa" viewBox="0 0 60 40">
+      <svg className="moldura-coroa-svg" viewBox="0 0 60 40">
         <path d="M4 34 8 8l13 14L30 2l9 20L52 8l4 26z" />
         <circle cx="30" cy="27" r="3.4" />
       </svg>
